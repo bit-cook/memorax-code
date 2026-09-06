@@ -37,20 +37,21 @@ contracts in the same change.
   guesses, and another client's format are never fallbacks.
 - Include the client in session, turn metadata, trace, and operational identity.
   Equal native IDs across clients must stay isolated.
-- Pin each live session to its workspace and repository scope. Linked
-  worktrees may share repository scope; unrelated repositories and genuine
-  non-Git workspaces keep separate local identity. Only the documented
-  malformed/incomplete direct-`.git` exception may use local-folder scope,
-  then upgrade in-session to verified Git scope for the same Base User ID and
-  canonical workspace root; discard pending fallback writeback on upgrade.
-  Other missing, unreadable, malformed, or conflicting scope authority must
-  not silently fall back or rebind.
+- For a fixed Base User ID, pin each live session to its workspace and
+  repository scope. Linked worktrees may share repository scope; unrelated
+  repositories and genuine non-Git workspaces keep separate local identity.
+  Only the documented malformed/incomplete direct-`.git` exception may use
+  local-folder scope, then upgrade in-session to verified Git scope for the
+  same Base User ID and canonical workspace root; discard pending fallback
+  writeback on upgrade. Other missing, unreadable, malformed, or conflicting
+  scope authority must not silently fall back or rebind. A changed Base User ID
+  requires a new binding; existing Turn metadata must still pass scope validation.
 - Derive repository identity read-only, without executing Git. Preserve path
   canonicalization, Git marker validation, symlink/junction containment, and
   fail-closed behavior.
-- Consume turn metadata only after downstream acceptance. Rejection, missing
-  content, interruption, and concurrent replacement require explicit retention
-  or discard reasons.
+- For completed content, consume matching turn metadata only after local
+  writeback enqueue acceptance. Rejection, missing content, interruption, and
+  concurrent replacement require explicit retention or discard reasons.
 - Use versioned private authority for Backend connection, token, PID, Hook
   generation, and lifecycle records. Cross-process read/modify/write needs
   bounded locking or equivalent version validation, not only in-memory queues.
@@ -59,10 +60,14 @@ contracts in the same change.
 
 ## 4. Data and User-Facing Boundaries
 
-- Never log, commit, or publish credentials, Backend tokens, Authorization
-  headers, private transcripts, raw rollouts, retained traces, personal memory,
-  or user absolute paths. MemoraX receives only documented query/add/writeback
-  payloads; local trace provenance and transcript paths stay local.
+- Never log, commit, or publish credentials, Backend tokens, or Authorization
+  headers.
+- Never commit or publish private transcripts, raw rollouts, retained traces,
+  personal memory, or user absolute paths. Documented local trace and diagnostic
+  storage must follow [SECURITY.md](SECURITY.md#local-data-and-diagnostics);
+  review and redact any diagnostic excerpt before sharing it. MemoraX receives
+  only documented query/add/writeback payloads; local trace provenance and
+  transcript paths stay local.
 - Keep the shared `memorax-code` Skill valid in every supported client's
   packaging, including its triggers, metadata, references, and resource paths.
   Packaged Skills address product users; exclude maintainer runbooks, private
