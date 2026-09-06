@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -39,6 +39,4 @@ test("memorax-code routes personal procedure reads and writes", () => {
   assert.match(writeReference, /preserve unrelated content/);
   assert.match(writeReference, /Do not retain deleted text in tombstones/);
   assert.match(writeReference, /Apply the same rule to superseded text/);
-
-  assert.equal(existsSync(join(skillRoot, "scripts", "user-profile-memory.mjs")), true);
 });

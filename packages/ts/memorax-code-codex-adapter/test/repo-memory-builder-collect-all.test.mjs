@@ -369,6 +369,7 @@ test("collect-all can require provider evidence instead of falling back", () => 
     assert.notEqual(result.status, 0);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, false);
+    assert.equal(report.effective_settings.history.mode, "provider-required");
     assert.equal(report.failed_step, "provider_facets");
     assert.equal(report.steps.git_commits.ok, true);
     assert.match(report.steps.provider_facets.stderr, /Could not resolve to a Repository/);
@@ -392,6 +393,7 @@ test("collect-all can skip provider evidence even when provider is ready", () =>
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);
+    assert.equal(report.effective_settings.history.mode, "local-only");
     assert.equal(report.provider.evidence_state, "ready");
     assert.equal(report.steps.provider_facets.skipped, true);
     assert.equal(report.steps.provider_facets.reason, "provider_skipped_by_user");
@@ -485,24 +487,6 @@ test("collect-all supports commits-only history mode without provider access", (
     assert.equal(report.steps.provider_facets.skipped, true);
     assert.equal(report.steps.provider_facets.reason, "history_provider_disabled_by_policy");
     assert.equal(existsSync(join(repo, ".repo_memory", "raw", "github-facets.json")), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("collect-all maps legacy provider flags to history modes", () => {
-  const root = mkdtempSync(join(tmpdir(), "memorax-code-repo-memory-history-legacy-flags."));
-  try {
-    const { repo, bin } = createRepoFixture(root);
-    createFakeAuthenticatedGithubCli(join(bin, "gh"));
-
-    const skipped = runCollectAll(repo, bin, ["--skip-provider"]);
-    assert.equal(skipped.status, 0, skipped.stderr || skipped.stdout);
-    assert.equal(JSON.parse(skipped.stdout).effective_settings.history.mode, "local-only");
-
-    const required = runCollectAll(repo, bin, ["--reuse", "--require-provider"]);
-    assert.notEqual(required.status, 0);
-    assert.equal(JSON.parse(required.stdout).effective_settings.history.mode, "provider-required");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -770,7 +754,8 @@ test("repo-memory prepare allows a user-profile-only .repo_memory sidecar", () =
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
     });
     assert.equal(profile.status, 0, profile.stderr || profile.stdout);
-    assert.equal(existsSync(join(repo, ".repo_memory", "user-profile", "preferences.md")), true);
+    const profilePath = join(repo, ".repo_memory", "user-profile", "preferences.md");
+    const originalProfile = readFileSync(profilePath);
 
     const prepared = spawnSync(process.execPath, [repoMemoryScript, "prepare", repo], {
       cwd: packageRoot,
@@ -778,7 +763,7 @@ test("repo-memory prepare allows a user-profile-only .repo_memory sidecar", () =
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
     });
     assert.equal(prepared.status, 0, prepared.stderr || prepared.stdout);
-    assert.equal(existsSync(join(repo, ".repo_memory", "user-profile", "preferences.md")), true);
+    assert.deepEqual(readFileSync(profilePath), originalProfile);
     assert.equal(existsSync(join(repo, ".repo_memory", "raw", "prepare-report.json")), true);
     assert.equal(existsSync(join(repo, ".repo_memory", "resources")), true);
   } finally {

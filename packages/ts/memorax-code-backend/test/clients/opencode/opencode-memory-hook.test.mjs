@@ -8,48 +8,8 @@ import { createOpenCodeMemoryHookRuntime } from "../../../dist/clients/opencode/
 import { openCodeMessageTurn } from "../../../dist/clients/opencode/message-turn.js";
 import { openCodeTracePaths } from "../../../dist/trace/config.js";
 import { createMemoryTurnCoordinator } from "../../../dist/memory/turn-coordinator.js";
-import {
-  parseTurnStartCommand,
-  parseWritebackCommand,
-} from "../../../dist/memory/hook-command.js";
 
 const TEST_WORKSPACE = fileURLToPath(new URL("../../..", import.meta.url));
-
-test("OpenCode Hook commands keep a closed client-specific schema", () => {
-  assert.equal(parseTurnStartCommand({
-    version: 1,
-    client: "opencode",
-    sessionId: "session-1",
-    userMessageId: "user-1",
-    prompt: "Use the OpenCode SDK turn.",
-    cwd: TEST_WORKSPACE,
-  }).ok, true);
-  assert.equal(parseWritebackCommand({
-    version: 1,
-    client: "opencode",
-    sessionId: "session-1",
-    userMessageId: "user-1",
-    assistantMessageId: "assistant-1",
-    messages: [],
-  }).ok, true);
-  assert.equal(parseTurnStartCommand({
-    version: 1,
-    client: "opencode",
-    sessionId: "session-1",
-    userMessageId: "user-1",
-    prompt: "Do not accept another client's transcript field.",
-    transcriptPath: "/tmp/transcript.jsonl",
-  }).ok, false);
-  assert.equal(parseWritebackCommand({
-    version: 1,
-    client: "opencode",
-    sessionId: "session-1",
-    userMessageId: "user-1",
-    assistantMessageId: "assistant-1",
-    messages: [],
-    lastAssistantMessage: "Hook text is not OpenCode writeback authority.",
-  }).ok, false);
-});
 
 test("OpenCode SDK messages materialize only an exact completed normal turn", () => {
   const valid = openCodeMessageTurn(openCodeMessages(), {
@@ -254,7 +214,7 @@ test("OpenCode finalizes an explicit MessageAbortedError without writeback", asy
   }
 });
 
-test("OpenCode runtime reuses retrieval, scope, writeback, and quota notices", async () => {
+test("OpenCode runtime routes SDK content and carries write quota to the next prompt", async () => {
   const memoraxCodeHome = await mkdtemp(join(tmpdir(), "memorax-code-opencode-runtime-"));
   const requests = [];
   let searchCalls = 0;
@@ -287,7 +247,6 @@ test("OpenCode runtime reuses retrieval, scope, writeback, and quota notices", a
             score: 0.9,
             metadata: { memory_type: "core" },
           }],
-          ...(searchCalls === 1 ? { balances: [quotaBalance("memory_search", 10)] } : {}),
         },
       } : {
         success: true,
@@ -313,8 +272,6 @@ test("OpenCode runtime reuses retrieval, scope, writeback, and quota notices", a
       workspaceKind: "project",
     });
     assert.match(start.additionalContext, /shared retrieval runtime/);
-    assert.equal(start.userNotice, "memory_search: 10");
-    assert.doesNotMatch(start.additionalContext, /memory_search/);
 
     assert.deepEqual(await runtime.writeback({
       version: 1,

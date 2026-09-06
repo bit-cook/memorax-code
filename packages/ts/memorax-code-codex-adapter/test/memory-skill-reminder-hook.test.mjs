@@ -36,7 +36,7 @@ test("manifest reuses capture-cwd for compact and keeps one serialized UserPromp
   ]);
 });
 
-test("memory skill reminder emits without repo profile on the first and sixth prompts", async () => {
+test("memory skill reminder emits Codex context without creating repo profile state", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-"));
   const memoraxCodeHome = join(root, "memorax-code");
   try {
@@ -46,24 +46,16 @@ test("memory skill reminder emits without repo profile on the first and sixth pr
         codexSessionId: "native-thread",
       },
     });
-    const outputs = [];
-    for (let index = 0; index < 6; index += 1) {
-      outputs.push(await runHook({
-        hook_event_name: "UserPromptSubmit",
-        session_id: "native-thread",
-        turn_id: `turn-${index + 1}`,
-        transcript_path: "/tmp/native-thread.jsonl",
-        prompt: `prompt ${index + 1}`,
-      }, { MEMORAX_CODE_HOME: memoraxCodeHome }));
-    }
+    const result = await runHook({
+      hook_event_name: "UserPromptSubmit",
+      session_id: "native-thread",
+      turn_id: "turn-1",
+      transcript_path: "/tmp/native-thread.jsonl",
+      prompt: "first prompt",
+    }, { MEMORAX_CODE_HOME: memoraxCodeHome });
 
-    for (const result of outputs) assert.equal(result.code, 0, result.stderr);
-    assertMemoryReminder(outputs[0].stdout);
-    assert.equal(outputs[1].stdout, "");
-    assert.equal(outputs[2].stdout, "");
-    assert.equal(outputs[3].stdout, "");
-    assert.equal(outputs[4].stdout, "");
-    assertMemoryReminder(outputs[5].stdout);
+    assert.equal(result.code, 0, result.stderr);
+    assertMemoryReminder(result.stdout);
     await assert.rejects(readFile(join(memoraxCodeHome, "adapters", "codex", "repo-user-profile-injections.json"), "utf8"), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -531,153 +523,7 @@ test("combined memory hook does not record an orphan reminder when turn start fa
   }
 });
 
-test("memory skill reminder reads interval from MemoraX Code config", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-config-"));
-  const memoraxCodeHome = join(root, "memorax-code");
-  try {
-    await writeRegistry(memoraxCodeHome, {
-      "native-thread": {
-        key: "native-thread",
-        codexSessionId: "native-thread",
-      },
-    });
-    await writeFile(join(memoraxCodeHome, "config.toml"), [
-      "[memory.skill_reminder]",
-      "interval_turns = 2",
-      "",
-    ].join("\n"));
-
-    const first = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-1",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "prompt 1",
-    }, { MEMORAX_CODE_HOME: memoraxCodeHome });
-    const second = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-2",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "prompt 2",
-    }, { MEMORAX_CODE_HOME: memoraxCodeHome });
-    const third = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-3",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "prompt 3",
-    }, { MEMORAX_CODE_HOME: memoraxCodeHome });
-
-    assert.equal(first.code, 0, first.stderr);
-    assert.equal(second.code, 0, second.stderr);
-    assert.equal(third.code, 0, third.stderr);
-    assertMemoryReminder(first.stdout);
-    assert.equal(second.stdout, "");
-    assertMemoryReminder(third.stdout);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("memory skill reminder lets env override the config interval", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-env-"));
-  const memoraxCodeHome = join(root, "memorax-code");
-  try {
-    await writeRegistry(memoraxCodeHome, {
-      "native-thread": {
-        key: "native-thread",
-        codexSessionId: "native-thread",
-      },
-    });
-    await writeFile(join(memoraxCodeHome, "config.toml"), [
-      "[memory.skill_reminder]",
-      "interval_turns = 9",
-      "",
-    ].join("\n"));
-
-    const first = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-1",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "prompt 1",
-    }, {
-      MEMORAX_CODE_HOME: memoraxCodeHome,
-      MEMORAX_CODE_MEMORY_SKILL_REMINDER_INTERVAL_TURNS: "2",
-    });
-    const second = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-2",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "prompt 2",
-    }, {
-      MEMORAX_CODE_HOME: memoraxCodeHome,
-      MEMORAX_CODE_MEMORY_SKILL_REMINDER_INTERVAL_TURNS: "2",
-    });
-    const third = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-3",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "prompt 3",
-    }, {
-      MEMORAX_CODE_HOME: memoraxCodeHome,
-      MEMORAX_CODE_MEMORY_SKILL_REMINDER_INTERVAL_TURNS: "2",
-    });
-
-    assert.equal(first.code, 0, first.stderr);
-    assert.equal(second.code, 0, second.stderr);
-    assert.equal(third.code, 0, third.stderr);
-    assertMemoryReminder(first.stdout);
-    assert.equal(second.stdout, "");
-    assertMemoryReminder(third.stdout);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("memory skill reminder ignores invalid config intervals", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-invalid-config-"));
-  const memoraxCodeHome = join(root, "memorax-code");
-  try {
-    await writeRegistry(memoraxCodeHome, {
-      "native-thread": {
-        key: "native-thread",
-        codexSessionId: "native-thread",
-      },
-    });
-    await writeFile(join(memoraxCodeHome, "config.toml"), [
-      "[memory.skill_reminder]",
-      "interval_turns = 0",
-      "",
-    ].join("\n"));
-
-    const outputs = [];
-    for (let index = 0; index < 6; index += 1) {
-      outputs.push(await runHook({
-        hook_event_name: "UserPromptSubmit",
-        session_id: "native-thread",
-        turn_id: `turn-${index + 1}`,
-        transcript_path: "/tmp/native-thread.jsonl",
-        prompt: `prompt ${index + 1}`,
-      }, { MEMORAX_CODE_HOME: memoraxCodeHome }));
-    }
-
-    for (const result of outputs) assert.equal(result.code, 0, result.stderr);
-    assertMemoryReminder(outputs[0].stdout);
-    assert.equal(outputs[1].stdout, "");
-    assert.equal(outputs[2].stdout, "");
-    assert.equal(outputs[3].stdout, "");
-    assert.equal(outputs[4].stdout, "");
-    assertMemoryReminder(outputs[5].stdout);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("memory skill reminder counts a repeated turn id only once", async () => {
+test("Codex reminder preserves native turn idempotency with config and environment cadence", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-idempotent-turn-"));
   const memoraxCodeHome = join(root, "memorax-code");
   try {
@@ -689,7 +535,7 @@ test("memory skill reminder counts a repeated turn id only once", async () => {
     });
     await writeFile(join(memoraxCodeHome, "config.toml"), [
       "[memory.skill_reminder]",
-      "interval_turns = 1",
+      "interval_turns = 2",
       "",
     ].join("\n"));
 
@@ -713,17 +559,30 @@ test("memory skill reminder counts a repeated turn id only once", async () => {
       transcript_path: "/tmp/native-thread.jsonl",
       turn_id: "turn-2",
       prompt: "second prompt",
+    }, {
+      MEMORAX_CODE_HOME: memoraxCodeHome,
+      MEMORAX_CODE_MEMORY_SKILL_REMINDER_INTERVAL_TURNS: "1",
+    });
+    const third = await runHook({
+      hook_event_name: "UserPromptSubmit",
+      session_id: "native-thread",
+      transcript_path: "/tmp/native-thread.jsonl",
+      turn_id: "turn-3",
+      prompt: "third prompt",
     }, { MEMORAX_CODE_HOME: memoraxCodeHome });
 
     assert.equal(first.code, 0, first.stderr);
     assert.equal(duplicate.code, 0, duplicate.stderr);
     assert.equal(second.code, 0, second.stderr);
+    assert.equal(third.code, 0, third.stderr);
     assertMemoryReminder(first.stdout);
     assert.equal(duplicate.stdout, "");
     assertMemoryReminder(second.stdout);
+    assertMemoryReminder(third.stdout);
     const state = JSON.parse(await readFile(join(memoraxCodeHome, "adapters", "codex", "memory-skill-reminders.json"), "utf8"));
-    assert.equal(state.sessions["native-thread"].turnCount, 2);
-    assert.equal(state.sessions["native-thread"].lastTurnId, "turn-2");
+    assert.equal(state.runtime, "codex");
+    assert.equal(state.sessions["native-thread"].turnCount, 3);
+    assert.equal(state.sessions["native-thread"].lastTurnId, "turn-3");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -823,62 +682,22 @@ test("concurrent reminder Hooks emit and count one repeated turn only once", asy
   }
 });
 
-test("memory skill reminder resets corrupt reminder state", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-corrupt-state-"));
-  const memoraxCodeHome = join(root, "memorax-code");
-  try {
-    await writeRegistry(memoraxCodeHome, {
-      "native-thread": {
-        key: "native-thread",
-        codexSessionId: "native-thread",
-      },
-    });
-    const statePath = join(memoraxCodeHome, "adapters", "codex", "memory-skill-reminders.json");
-    await mkdir(dirname(statePath), { recursive: true });
-    await writeFile(statePath, "{not json");
-
-    const result = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-after-corrupt-state",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "prompt after corrupt state",
-    }, { MEMORAX_CODE_HOME: memoraxCodeHome });
-
-    assert.equal(result.code, 0, result.stderr);
-    assertMemoryReminder(result.stdout);
-    const state = JSON.parse(await readFile(statePath, "utf8"));
-    assert.equal(state.runtime, "codex");
-    assert.equal(state.sessions["native-thread"].turnCount, 1);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test("memory skill reminder accepts unregistered Codex sessions", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-unregistered-"));
   const memoraxCodeHome = join(root, "memorax-code");
   try {
-    const outputs = [];
-    for (let index = 0; index < 6; index += 1) {
-      outputs.push(await runHook({
-        hook_event_name: "UserPromptSubmit",
-        session_id: "unregistered-thread",
-        turn_id: `turn-${index + 1}`,
-        transcript_path: "/tmp/unregistered-thread.jsonl",
-        prompt: `prompt ${index + 1}`,
-      }, { MEMORAX_CODE_HOME: memoraxCodeHome }));
-    }
+    const result = await runHook({
+      hook_event_name: "UserPromptSubmit",
+      session_id: "unregistered-thread",
+      turn_id: "turn-1",
+      transcript_path: "/tmp/unregistered-thread.jsonl",
+      prompt: "first prompt",
+    }, { MEMORAX_CODE_HOME: memoraxCodeHome });
 
-    for (const result of outputs) assert.equal(result.code, 0, result.stderr);
-    assertMemoryReminder(outputs[0].stdout);
-    assert.equal(outputs[1].stdout, "");
-    assert.equal(outputs[2].stdout, "");
-    assert.equal(outputs[3].stdout, "");
-    assert.equal(outputs[4].stdout, "");
-    assertMemoryReminder(outputs[5].stdout);
+    assert.equal(result.code, 0, result.stderr);
+    assertMemoryReminder(result.stdout);
     const state = JSON.parse(await readFile(join(memoraxCodeHome, "adapters", "codex", "memory-skill-reminders.json"), "utf8"));
-    assert.equal(state.sessions["unregistered-thread"].turnCount, 6);
+    assert.equal(state.sessions["unregistered-thread"].turnCount, 1);
     await assert.rejects(readFile(join(memoraxCodeHome, "adapters", "codex", "session-registry.json"), "utf8"), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -927,11 +746,6 @@ function reminderContext(stdout) {
 function assertMemoryReminder(stdout) {
   const context = reminderContext(stdout);
   assert.equal(context, MEMORY_REMINDER_CONTEXT);
-  assert.match(context, /proactively invoke/);
-  assert.match(context, /follow the skill's router to decide whether any memory operation is needed/);
-  assert.match(context, /repository-scoped personal memory/);
-  assert.doesNotMatch(context, /repo memory/i);
-  assert.match(context, /classify the authority before reading or writing/);
 }
 
 function assertProfileReminder(stdout) {

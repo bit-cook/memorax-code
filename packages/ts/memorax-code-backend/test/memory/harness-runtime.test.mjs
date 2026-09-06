@@ -7,6 +7,66 @@ import { createHarnessMemoryRuntime } from "../../dist/memory/harness-runtime.js
 import { createRepositoryMemorySessionRuntime } from "../../dist/memory/repository-session.js";
 import { createMemoryTurnCoordinator } from "../../dist/memory/turn-coordinator.js";
 
+test("harness retrieval keeps quota notices separate and claims them once per correlated turn", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-harness-retrieval-"));
+  const requests = [];
+  const claims = [];
+  const runtime = createHarnessMemoryRuntime(definition("claude-code"), {
+    memoraxCodeHome: root,
+    env: {
+      MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
+      MEMORAX_CODE_MEMORAX_API_KEY: "test-key",
+      MEMORAX_CODE_MEMORAX_USER_ID: "test-user",
+      MEMORAX_CODE_MEMORY_RETRIEVAL_ENABLED: "true",
+      MEMORAX_CODE_CLAUDE_TRACE_ENABLED: "false",
+    },
+    pendingQuotaNotice: {
+      async claim() { claims.push("write"); return "Pending Add quota notice."; },
+      queue() {},
+      close() {},
+    },
+    claimQuotaNotice: async (_config, quota) => {
+      claims.push(quota.featureCode);
+      return `Search quota: ${quota.remaining} remaining.`;
+    },
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          task_id: "harness-retrieval",
+          status: "completed",
+          data: [{ id: "memory-1", memory: "Keep the parser boundary.", score: 0.9 }],
+          balances: [{
+            product_code: "memory_api", feature_code: "memory_search",
+            spec_key: "calls", quota_unit: "times", quota_limit: 100,
+            reserved: 1, consumed: 0, remaining: 10,
+          }],
+        },
+      }), { headers: { "content-type": "application/json" } });
+    },
+  });
+  const turn = { sessionId: "session", clientTurnId: "turn", cwd: root, createdAt: Date.now(), prompt: "Recall the parser boundary." };
+  try {
+    assert.deepEqual(await runtime.recordTurnStart({ ...turn, clientTurnId: undefined }), { ok: true });
+    assert.equal(runtime.size(), 0);
+    assert.deepEqual(claims, []);
+    assert.deepEqual(requests, []);
+
+    const first = await runtime.recordTurnStart(turn);
+    assert.match(first.additionalContext, /Keep the parser boundary/);
+    assert.equal(first.userNotice, "Pending Add quota notice.\nSearch quota: 10 remaining.");
+    assert.doesNotMatch(first.additionalContext, /Pending Add quota|Search quota/);
+
+    assert.deepEqual(await runtime.recordTurnStart(turn), { ok: true });
+    assert.deepEqual(claims, ["write", "memory_search"]);
+    assert.deepEqual(requests.map(({ query }) => query), [turn.prompt]);
+  } finally {
+    runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("harness runtime rejects conflicting trace identity before recording or dispatching", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-harness-identity-"));
   const writebacks = [];
