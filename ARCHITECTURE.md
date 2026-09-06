@@ -109,19 +109,24 @@ relationships; the arrow labels distinguish them. It is not an import graph.
 
 ### 2.1 Repository components
 
-| Component | Stable responsibility | Must not own | Primary evidence |
-| --- | --- | --- | --- |
-| `packages/ts/memorax-code-backend` | Local service, managed automatic-update scheduling, Hook HTTP, native client-content interpretation, memory workflows, Repo Memory collection and validation, local User Profile management, repository scope, MemoraX adapter, trace, and lifecycle | Model execution, client model-provider credentials, or native transcript creation | `packages/ts/memorax-code-backend/src/app/backend-server.ts`, `packages/ts/memorax-code-backend/src/lifecycle/automatic-update-scheduler.ts`, `packages/ts/memorax-code-backend/src/memory/service.ts`, `packages/ts/memorax-code-backend/src/repo-memory`, `packages/ts/memorax-code-backend/src/personal-memory`, and the capability directories under `src` |
-| `packages/ts/memorax-code-adapter-common` | Shared source for Backend connection authority and command transport, private runtime, setup-completion, automatic-update and secure credential records, cross-process locking and configuration, Hook generations, Hook launch helpers, and Repo/Personal Memory helpers | Backend composition, native transcript interpretation, MemoraX request execution, or client plugin policy | `packages/ts/memorax-code-adapter-common/src/backend-connection.mjs`, `src/backend-command.mjs`, `src/runtime-record.mjs`, `src/setup-completion.mjs`, `src/automatic-update-state.mjs`, `src/credentials`, `src/hooks`, and `src/repo-memory` |
-| `packages/ts/memorax-code-codex-adapter` | Codex plugin artifact, Hook shells and runtimes, session/workspace observation, diagnostics, and the canonical shared skill | Codex rollout semantics or Backend-side writeback authority | `.codex-plugin`, `hooks`, `runtime-hooks`, `src`, and `skills/memorax-code` |
-| `packages/ts/memorax-code-claude-adapter` | Claude Code plugin artifact, Hook shells and runtimes, configuration, installer, marketplace source, and diagnostics | Claude transcript semantics or Backend memory orchestration | `.claude-plugin`, `hooks`, `runtime-hooks`, `scripts`, and `src/plugin-install.mjs` |
-| `packages/ts/memorax-code-dsh-adapter` | DSH Cordis Turn listener, personal-context composition, shared-skill and supervised Repo Memory integration, exact persisted-event interval validation, local Backend wire protocol, Profile lifecycle, per-user runtime-bundle materialization, and durable runtime authority | Backend-side event interpretation, MemoraX request execution, or DSH provider and session ownership | `src/plugin.mjs`, `src/profile-lifecycle.mjs`, `hooks/repo-memory-job.mjs`, and the adapter tests |
-| `packages/ts/memorax-code-opencode-adapter` | OpenCode plugin runtime, managed thin-loader installation, automatic retrieval, SDK-backed writeback, shell-session identity, workspace runtime evidence and diagnostics, a materialized shared skill, and supervised Repo Memory maintenance and missing-bundle initialization | OpenCode message interpretation inside the Backend or model-provider configuration | `src/plugin.mjs`, `src/plugin-install.mjs`, `src/cli.mjs`, `src/repo-memory-server-runner.mjs`, and the OpenCode materialization mapping in `scripts/npm-source-files.mjs` |
-| `packages/ts/memorax-code-codebuddy-adapter` | CodeBuddy/WorkBuddy plugin manifest, SessionStart/UserPromptSubmit/Stop Hooks, native JSONL transcript bridge, memory retrieval/writeback, trace/reconciliation, Skill materialization, and supervised Repo Memory maintenance | CodeBuddy transcript interpretation inside the Backend or model-provider configuration | `.codebuddy-plugin`, `hooks`, `src`, and `skills/memorax-code` |
-| `packages/ts/memorax-code-trae-adapter` | Trae application discovery, marker-owned SessionStart/UserPromptSubmit/Stop Hook merging, content-addressed runtime generation, shared-Skill materialization, runtime observation, and lifecycle diagnostics | Trae provider settings, application-level Global Hooks activation, or a guessed native Session | `hooks/runtime-hook.mjs`, `src/config.mjs`, `src/adapter-paths.mjs`, and the adapter tests |
-| `packages/npm/memorax-code` | Installed executable wrappers, foreground and automatic update reconciliation, trial identity and credential provisioning, package-transition handling, update, npm lifecycle scripts, manifest, and release-package source | Backend lifecycle semantics, uninstall orchestration, or artifact staging | `bin`, `lib/automatic-update.mjs`, `lib/setup-reconcile.mjs`, `lib/package-transition.mjs`, `lib/trial-setup.mjs`, `lib/run-entrypoint.mjs`, and `package.json` |
-| `scripts` | Backend build orchestration, staging/materialization, package layout, documentation, and local-only data gates | Product runtime authority | Package-build/check scripts and executable contract scripts |
-| `.github` | Issue and pull-request contribution templates | Product runtime behavior | `.github/ISSUE_TEMPLATE` and `.github/pull_request_template.md` |
+Adapters deploy native integrations, bridge client events to Backend commands,
+and present returned context and diagnostics. Backend client runtimes own the
+native interpretation used by memory workflows. Model execution and provider
+configuration remain client-owned.
+
+| Component | Stable responsibility | Must not own |
+| --- | --- | --- |
+| [Backend](packages/ts/memorax-code-backend) | Local memory service, native content interpretation, repository scope, local memory helpers, trace, lifecycle, and update scheduling; see [capability ownership](#43-capability-ownership) | Model execution, client model-provider credentials, or native transcript creation |
+| [adapter-common](packages/ts/memorax-code-adapter-common) | Shared connection and private-record primitives, credential storage, locks, Hook transport/generations, and local memory helpers | Backend composition, native content interpretation, MemoraX requests, or client plugin policy |
+| [Codex adapter](packages/ts/memorax-code-codex-adapter) | Codex plugin, Hooks, workspace observation, and the canonical shared Skill | Rollout interpretation or Backend writeback orchestration |
+| [Claude Code adapter](packages/ts/memorax-code-claude-adapter) | Claude plugin, Hooks, installer, and marketplace source | Transcript interpretation or Backend memory orchestration |
+| [DSH adapter](packages/ts/memorax-code-dsh-adapter) | Cordis Turn bridge, persisted-interval delivery, Profile and runtime-generation lifecycle, and supervised Repo Memory | Backend event interpretation or DSH provider/session ownership |
+| [OpenCode adapter](packages/ts/memorax-code-opencode-adapter) | Plugin and thin loader, SDK record delivery, shell-session identity, workspace evidence, and supervised Repo Memory | Backend message interpretation or model-provider configuration |
+| [CodeBuddy/WorkBuddy adapter](packages/ts/memorax-code-codebuddy-adapter) | Marketplace plugin, Hooks, native transcript bridge, and supervised Repo Memory | Backend transcript interpretation or model-provider configuration |
+| [Trae adapter](packages/ts/memorax-code-trae-adapter) | Managed Global Hooks, versioned runtime and Skill deployment, and Hook observation | Global Hooks activation, provider settings, or guessed native Sessions |
+| [npm package](packages/npm/memorax-code) | Installed wrappers, setup and update reconciliation, trial provisioning, and package replacement | Backend lifecycle semantics, uninstall orchestration, or artifact staging |
+| [scripts](scripts) | Build, staging/materialization, and repository/artifact checks | Product runtime authority |
+| [.github](.github) | Issue and pull-request contribution templates | Product runtime behavior |
 
 `memorax-code-adapter-common` is a source layer consumed by the Backend and all
 six adapters; it is not an independently deployed service. The npm artifact
@@ -214,143 +219,91 @@ sequenceDiagram
   end
 ```
 
-npm lifecycle and foreground setup are separate authority boundaries. Fresh
-or stopped package installation is non-interactive and leaves the Backend
-stopped. When package replacement finds a running managed Backend, preinstall
-records and retires that installation; postinstall restores it with retained
-client intent and consumes the transition only after status succeeds. npm
-lifecycle never detects new clients, accepts credentials, or authorizes Hooks.
+npm lifecycle, foreground setup, and Backend scheduling have separate
+authority. npm replacement retires a running managed Backend and restores it
+with retained client intent, consuming the transition record only after status
+succeeds. Fresh or stopped installations remain stopped. npm lifecycle never
+detects new clients, accepts credentials, or authorizes Hooks.
 
-Public `memorax-code setup` owns disclosure, memory preferences, credential
-creation or entry, client discovery, first-time Hook activation, Backend
-reconciliation, and final verification. It requires an interactive terminal.
-A versioned completion record is committed only after setup succeeds; the
-no-argument CLI normally uses that record to choose between setup guidance and
-current status. For a legacy installation with a ready effective configuration
-but no completion record, an interactive no-argument invocation validates and
-reuses that configuration, then runs the same foreground setup and
-reconciliation once to commit the record. Without a ready configuration or
-interactive terminal, it continues to show setup guidance. Invalid or
-unsupported completion and package-transition records fail closed.
+Public `memorax-code setup` owns disclosure, preferences, credential
+provisioning or entry, client discovery, initial Hook activation, and Backend
+reconciliation. It requires an interactive terminal and commits the versioned
+completion record only after final verification. Invalid or unsupported
+completion and transition records fail closed. No-argument routing and legacy
+migration follow the [setup state rules](docs/configuration.md#setup-automatic-update-and-package-transition-state).
 
-After completion, the managed Backend reads the persisted automatic-update
-deadline and schedules a detached updater while the service remains running.
-Client startup Hooks only recover an unavailable Backend and do not own update
-cadence. The updater follows the installed release channel, serializes checks
-through the private record and lock, installs an exact published target, and
-invokes an internal non-interactive setup mode. That mode preserves the
-explicit client selection and configuration. A locally detected adapter whose
-key is absent from a legacy `[clients]` table is selected by default, while an
-explicit `false` remains disabled. Codex Hook changes are trusted silently only
-when the marketplace identity remains the same and the exact incremental Hook
-selection survives validation before and after the config write. Verification
-failure leaves reconciliation incomplete for a later retry. Package
-replacement may retire the dispatching Backend; the restored Backend resumes
-scheduling from the same durable record.
+After completed setup, the managed Backend schedules a detached updater from
+the durable deadline; client startup Hooks only recover an unavailable Backend.
+The updater serializes checks through its private record and lock, installs an
+exact target from the installed release channel, and reuses non-interactive
+setup reconciliation. It preserves explicit client choices and configuration.
+Codex Hook changes may be trusted silently only when marketplace identity stays
+the same and the exact incremental Hook selection validates before and after
+the config write. Failed verification leaves reconciliation incomplete; a
+replaced Backend resumes scheduling from the same record.
 
-The principal control-plane locations are:
+Hook generation staging and activation are separate decisions: failed Backend
+readiness must not replace the authoritative generation. Cross-process
+lifecycle decisions use versioned durable records and bounded locks, not only
+in-memory serialization.
 
-- `packages/npm/memorax-code/bin` for installed package scripts, foreground
-  setup, and wrappers;
-- `packages/npm/memorax-code/lib/package-transition.mjs` for npm replacement
-  intent and restoration;
-- `packages/npm/memorax-code/lib/automatic-update.mjs` for release-channel
-  checks, exact package installation, cadence state, and non-interactive
-  reconciliation;
-- `packages/ts/memorax-code-adapter-common/src/setup-completion.mjs` for the
-  shared setup-completion record;
-- `packages/ts/memorax-code-adapter-common/src/automatic-update-state.mjs`
-  for the shared cadence record;
-- `packages/ts/memorax-code-backend/src/lifecycle/automatic-update-scheduler.ts`
-  for managed Backend scheduling ownership;
-- `packages/ts/memorax-code-backend/src/entrypoints/backend-cli.ts` for
-  process-facing command orchestration;
-- `packages/ts/memorax-code-backend/src/lifecycle` for start, stop, restart,
-  status, uninstall, client selection, participants, and locks;
-- `packages/ts/memorax-code-backend/src/lifecycle/backend` for Backend process,
-  PID/token/connection records, cleanup, status probing, and shutdown;
-- `packages/ts/memorax-code-adapter-common/src/hooks` for immutable Hook
-  generation and launch selection; and
-- each adapter lifecycle participant for client-specific preparation, status,
-  disablement, and removal. OpenCode's participant delegates plugin and skill
-  materialization to `memorax-code-opencode-adapter/src/plugin-install.mjs`;
-  DSH's participant delegates Profile and runtime-bundle lifecycle to
-  `memorax-code-dsh-adapter/src/profile-lifecycle.mjs`; and Trae's participant
-  delegates Hook merging, runtime generation, and Skill materialization to
-  `memorax-code-trae-adapter/src/config.mjs`.
+Control-plane implementations are grouped by ownership:
 
-Staging and activation are separate decisions. A failed Backend start must not
-replace the currently authoritative Hook generation. Cross-process lifecycle
-decisions use durable records and bounded locks rather than relying on one
-process's in-memory serialization.
+- [npm package](packages/npm/memorax-code) `bin` and `lib` own installed
+  wrappers, foreground setup, package transitions, and detached updates.
+- Backend `src/entrypoints/backend-cli.ts` and `src/lifecycle` own process
+  commands, lifecycle orchestration, scheduling, and Backend process authority.
+- Adapter-common owns shared records, locks, and Hook generations. Client
+  lifecycle participants invoke native preparation, status, and removal in
+  the [owning Backend or adapter modules](#22-physical-dependency-directions).
 
-DSH lifecycle discovery reads valid Profiles under `DSH_HOME`. The globally
-staged adapter source is immutable; the adapter materializes a content-addressed
-runtime generation under the selected `MEMORAX_CODE_HOME` and asks DSH's native
-plugin command to install that generation into each managed Profile. It uses an
-explicit, persisted, or directly available DSH command, or validates the DSH
-package already linked into the existing Profile dependency tree. It never
-installs or updates DSH. The resolved entrypoint and package version become the
-durable runtime authority; a later lifecycle reconciliation reads the existing
-runtime again so user-managed DSH updates can advance it. When DSH has an
-existing Profile but none can run headless work, the same native command
-initializes the standard `headless` Profile and brings it under adapter
-ownership so supervised Repo Memory always has a worker. Removal uninstalls the
-adapter without deleting DSH Profiles. The Backend lifecycle lock is acquired
-before the DSH state lock. Start quiesces the old authority, prepares Profile
-artifacts with authority disabled, and activates them only after Backend
-readiness. Stop, update, and uninstall publish disabled authority before
-Profile mutation. A disabled or invalid runtime stays inert inside DSH rather
-than registering listeners or recovering the Backend. A DSH failure found by
-automatic client discovery makes setup or an unqualified `start` or `status`
-command degraded without blocking the Backend or another client. Explicit
-`--clients dsh` and `--clients all` selections remain strict.
+The DSH adapter installs content-addressed runtime generations from immutable
+staged source into managed Profiles through DSH's native plugin manager. It
+never installs or updates DSH or deletes user Profiles. The validated DSH
+entrypoint and version form durable runtime authority and are revalidated
+during reconciliation. The Backend lifecycle lock precedes the DSH state lock.
+Start quiesces old authority, prepares artifacts while disabled, and activates
+them only after Backend readiness; stop, update, and uninstall disable
+authority before Profile mutation. Disabled or invalid runtime registers no
+listeners and cannot recover the Backend. Auto-discovered DSH failures degrade
+setup and unqualified `start` or `status` without blocking the Backend or other
+clients; explicit client selection remains strict. See
+[DSH configuration](docs/configuration.md#deepseek-harness-integration-paths)
+and [recovery](docs/troubleshooting.md#deepseek-harness-profile-integration-is-inactive)
+for discovery and Profile details.
 
-OpenCode lifecycle discovery accepts either its configuration directory or an
-`opencode` executable on `PATH`, so Desktop-only, CLI-only, and combined
-installations are supported. The installer records managed ownership under
-`$MEMORAX_CODE_HOME/adapters/opencode`, writes the auto-discovered plugin and
-skill artifacts under the OpenCode configuration directory, and leaves model
-and provider configuration untouched.
+The OpenCode adapter materializes auto-discovered plugin and Skill assets
+without changing model or provider settings. Plugin startup begins a
+best-effort Backend check; the first prompt shares a bounded interaction
+budget, while accepted-turn idle writeback may await the full check. Expiry
+skips that turn's automatic memory handling without cancelling recovery.
+Recovery uses the package-recorded Node runtime and `memorax-code start`,
+exact managed homes, and the existing
+lifecycle lock. It does not replace client selection, directly spawn the
+Backend, or recover remote or invalid connection authority. Content-free
+workspace runtime evidence proves plugin execution only; it is not session,
+transcript, repository-scope, or lifecycle authority. See
+[client discovery](docs/configuration.md#client-selection),
+[OpenCode paths](docs/configuration.md#opencode-integration-paths), and
+[recovery](docs/troubleshooting.md#opencode-plugin-or-skill-is-inactive)
+for operational details.
 
-When that managed plugin is enabled, plugin initialization starts one
-best-effort Backend availability check without blocking OpenCode startup. The
-first prompt shares one bounded interaction budget with that check; expiry
-skips automatic memory handling for the current turn while Backend recovery
-continues in the background. Idle writeback for an already accepted turn may
-wait for the full in-process check. Recovery uses the package-recorded Node
-runtime and `memorax-code start` entrypoint, exact MemoraX Code home and
-OpenCode configuration directory, and the existing lifecycle lock. It does
-not replace persistent client selection, directly spawn the Backend, or
-recover a remote or invalid connection authority.
+The Trae adapter materializes a content-addressed runtime, merges only
+marker-owned Hooks, and installs the canonical Skill. User Hooks remain
+untouched, and an unmanaged Skill at the target path fails closed. Global
+Hooks activation belongs to Trae and requires the user's one-time action;
+successful setup alone does not prove activation. Stop removes managed Hooks
+but preserves the Skill; uninstall also removes the managed Skill. See
+[Trae configuration](docs/configuration.md#trae-integration-paths) for paths
+and activation instructions.
 
-The enabled OpenCode plugin records content-free workspace runtime evidence on
-plugin load and real user messages under its adapter state directory. The
-OpenCode doctor combines managed-artifact status, that local evidence, and a
-live Backend health check. This evidence proves only that the plugin executed
-in a workspace; it is not session, transcript, repository-scope, or lifecycle
-authority.
-
-Trae lifecycle discovery accepts an explicit data home, an existing default
-data home, or a platform application installation. Its adapter materializes a
-content-addressed runtime under `$MEMORAX_CODE_HOME/adapters/trae`, merges one
-marker-owned command into each required event in Trae's `hooks.json`, and
-installs the canonical Skill under the Trae data home. Existing user Hooks are
-preserved, and an unmanaged Skill at the target path fails closed. Trae owns
-the application-level Global Hooks switch; setup reports the required one-time
-manual activation until the runtime records a real Hook observation. Stop
-removes marker-owned Hook entries and preserves the managed Skill; uninstall
-also removes the managed Skill. Neither operation removes user-owned Hooks.
-
-Foreground setup in the npm layer derives the versioned trial device identity,
-calls the MemoraX trial-provision endpoint, and commits the returned API key and
-account metadata through adapter-common's secure credential port. The secure
-credential record is authoritative for provisioning reuse; setup also projects
-the API key into private user configuration. Account, project, and device-mark
-metadata remain persisted only in secure credential storage. A matching
-anonymous quota reminder may read the device mark for user-facing account
-claiming, but it does not replace the configured repository-scoped memory
-identity.
+Foreground setup derives a versioned trial device identity, calls MemoraX
+provisioning, and persists the result through adapter-common's secure
+credential port. The secure record is authoritative for provisioning reuse;
+the API key is also projected into private configuration. Account, project,
+and device-mark metadata remain only in secure credential storage. A matching
+anonymous quota reminder may read the mark for account claiming, but it does
+not replace configured repository-scoped memory identity.
 
 ### 3.2 Hook and retrieval data flow
 
@@ -634,30 +587,28 @@ layering. Its top-level directories are not a strict linear dependency chain.
 
 ### 4.2 Source layout
 
+Capability directories hold implementation; their responsibilities are defined
+in the [ownership table](#43-capability-ownership). Each supported client has
+one directory under `clients/`.
+
 ```text
 src/
-  app/                    runtime composition, state, observability
-  clients/
-    codex/                Codex native interpretation and lifecycle adapters
-    claude/               Claude native interpretation and lifecycle participant
-    dsh/                  DSH native event-interval interpretation
-    opencode/             OpenCode retrieval, SDK message interpretation, and lifecycle participant
-    codebuddy/            CodeBuddy native JSONL interpretation and lifecycle participant
-    trae/                 Trae Hook-content interpretation and lifecycle participant
-  config/                 Backend and proxy/config interpretation
-  entrypoints/            process and management-CLI orchestration
+  app/
+  clients/<client>/
+  config/
+  entrypoints/
   lifecycle/
-    backend/              managed Backend process and durable lifecycle records
-  memory/                 client-neutral memory workflows and coordination
-  personal-memory/        local User Profile storage and CLI
+    backend/
+  memory/
+  personal-memory/
   provider/
-    memorax/              MemoraX configuration, payloads, transport, results
-  repo-memory/            deterministic Repo Memory collection and validation
-  repository/             repository-scope identity
-  shared/                 narrow Backend-local primitives without domain ownership
-  trace/                  client-qualified local operational trace
+    memorax/
+  repo-memory/
+  repository/
+  shared/
+  trace/
   transport/
-    http/                 shared Backend HTTP and Hook wire adaptation
+    http/
 ```
 
 The source root also contains a small, tested set of stable compiled
@@ -673,12 +624,7 @@ entrypoints and compatibility facades. It is not another implementation area.
 | `src/lifecycle` | Contracts, participants, client selection, locks, service orchestration, install watchdog, and client integration removal | Request-time memory flow does not depend on it |
 | `src/lifecycle/client-reports.ts` | Static lifecycle client identity and pure projections of adapter readiness and diagnostic summaries | No native discovery, filesystem or process access, lifecycle mutations, or replacement of raw client reports |
 | `src/lifecycle/backend` | Managed process, PID/token/connection records, status probing, cleanup, and shutdown requests | Helper contracts do not depend back on the full service implementation |
-| `src/clients/codex` | Codex rollout, prompt, turn-index, workspace interpretation and recovery; Hook memory integration through the shared harness runtime; plugin integration glue; and lifecycle participant | No Claude format fallback; request runtime remains HTTP-composition independent |
-| `src/clients/claude` | Claude transcript/turn interpretation, native correlation and interruption recovery, Hook memory integration through the shared harness runtime, and lifecycle participant | No Codex format fallback; request runtime remains HTTP-composition independent |
-| `src/clients/dsh` | DSH Session header and exact persisted event-interval interpretation, memory integration through the shared harness runtime, native interruption and normalized trace handling, and lifecycle-participant delegation | No Hook-text, rollout, transcript, SDK-message, or latest-Turn fallback; Profile mutation stays in the DSH adapter, and request runtime remains HTTP-composition independent |
-| `src/clients/opencode` | OpenCode SDK message validation and text materialization, native interruption handling, plugin memory integration through the shared harness runtime, and lifecycle participant | No Hook-text, database, rollout, or transcript fallback; completion requires a prior session scope binding; request runtime remains HTTP-composition independent |
-| `src/clients/codebuddy` | CodeBuddy/WorkBuddy native transcript interpretation, native correlation and interruption recovery, Hook memory integration through the shared harness runtime, and lifecycle participant | No Hook-payload or latest-Turn fallback; plugin mutation stays in the adapter, and request runtime remains HTTP-composition independent |
-| `src/clients/trae` | Trae Turn-ID validation, Hook-pair memory integration through the shared harness runtime, per-session start ordering and active-Turn interruption handling, trace normalization, and lifecycle participant | Hook content is authoritative only for the exact validated Trae Turn; no raw-Session guess, pending completion queue, or cross-client fallback |
+| `src/clients/<client>` | Native interpretation, correlation, interruption/recovery, trace adaptation, and lifecycle participation; delegates common memory workflows to the shared harness runtime | Request runtime stays HTTP-composition independent and uses only the matching [native authority](#native-writeback-authority); native deployment follows [package ownership](#22-physical-dependency-directions) |
 | `src/memory` | Memory commands, retrieval, writeback, turn coordination, repository session pinning, manual CLI, and buffering/chunking | Client-neutral modules do not parse native transcript formats |
 | `src/memory/harness-runtime.ts` | Common Turn-start and materialized-completion workflows for all six clients; publishes registered Turn state synchronously and owns locally created memory resources while reusing injected shared resources | No client implementation, HTTP, app/lifecycle, or direct provider-transport imports; diagnostics enter through a port and native interpretation stays with each client |
 | `src/personal-memory` | Local User Profile listing, normalization, duplicate detection, updates, deletion, and atomic storage | No Backend service, provider calls, transcript processing, or Procedure Memory mutation |
@@ -907,12 +853,7 @@ flowchart TD
   BackendBuild["Backend dist"]
   NpmSource["npm wrappers and manifest"]
   CommonSource["adapter-common runtime source"]
-  CodexSource["Codex adapter and canonical skill"]
-  ClaudeSource["Claude adapter"]
-  DshSource["DSH adapter"]
-  OpenCodeSource["OpenCode adapter"]
-  CodeBuddySource["CodeBuddy adapter"]
-  TraeSource["Trae adapter"]
+  AdapterSource["client adapters<br/>canonical Skill and plugin sources"]
   Stage["npm staging tree"]
   Materialize["skill and marketplace materialization"]
   Gates["layout, source, symlink, and local-only gates"]
@@ -923,12 +864,7 @@ flowchart TD
   BackendBuild --> Stage
   NpmSource --> Stage
   CommonSource --> Stage
-  CodexSource --> Stage
-  ClaudeSource --> Stage
-  DshSource --> Stage
-  OpenCodeSource --> Stage
-  CodeBuddySource --> Stage
-  TraeSource --> Stage
+  AdapterSource --> Stage
   Stage --> Materialize
   Materialize --> Gates
   Gates --> Pack
@@ -939,21 +875,16 @@ flowchart TD
   committed.
 - Adapter-common and adapter `.mjs` runtime trees are staged from declared,
   tracked source.
-- DSH lifecycle treats that staged source as read-only. It materializes a
-  content-addressed generation under `$MEMORAX_CODE_HOME/adapters/dsh/runtime`
-  and installs the generation into managed Profiles; the Profile artifact
-  excludes lifecycle control-plane source.
-- The Claude Code skill and marketplace and the DSH, OpenCode,
-  CodeBuddy/WorkBuddy, and Trae skill artifacts are materialized from canonical
-  sources; packaging may rewrite contained relative imports for the staged
-  topology.
-- OpenCode lifecycle installation writes only a managed thin loader and the
-  materialized skill into the client's auto-discovery directories. It does not
-  edit `opencode.json` or `opencode.jsonc`. Desktop discovery does not require
-  a standalone `opencode` command in `PATH`; CLI-only discovery does.
-- The npm wrappers use `packages/npm/memorax-code/lib/run-entrypoint.mjs` to
-  locate staged Backend or adapter entrypoints, including each client-specific
-  diagnostics CLI.
+- All client Skill artifacts share the canonical Codex source. The Claude
+  marketplace is also materialized from its canonical source; packaging may
+  rewrite contained relative imports for the staged topology. Source mappings
+  are declared in [npm-source-files.mjs](scripts/npm-source-files.mjs).
+- Client lifecycle installs managed artifacts from the staged package, as
+  described in the [control plane](#31-installation-and-lifecycle-control-plane).
+  DSH additionally materializes per-user runtime generations from read-only
+  staged source; its Profile artifact excludes lifecycle control-plane code.
+- Installed wrappers use [run-entrypoint.mjs](packages/npm/memorax-code/lib/run-entrypoint.mjs)
+  to locate staged Backend and adapter entrypoints.
 - Artifact gates reject undeclared paths, unsafe symlinks, cache/build debris,
   and local-only data-boundary violations.
 - Installed-package tests isolate MemoraX Code state and every affected client
