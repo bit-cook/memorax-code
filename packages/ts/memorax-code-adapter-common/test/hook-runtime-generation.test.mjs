@@ -10,8 +10,8 @@ import {
   clientHookRuntimePaths,
   readCurrentClientHookRuntime,
   stageClientHookRuntimeGeneration,
-} from "../../memorax-code-adapter-common/src/hooks/hook-runtime-generation.mjs";
-import { selectHookRuntime } from "../../memorax-code-adapter-common/src/hooks/client-hook-launcher.mjs";
+} from "../src/hooks/hook-runtime-generation.mjs";
+import { selectHookRuntime } from "../src/hooks/client-hook-launcher.mjs";
 
 const TEST_SHELL_VERSION = "1.2.3";
 

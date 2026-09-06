@@ -752,7 +752,7 @@ multiple directories does not automatically belong in `shared`.
 | Backend source boundaries | `packages/ts/memorax-code-backend/test/architecture/source-boundaries.test.mjs` | Root facade allowlist, discovered client-runtime coverage, selected direct forbidden imports including shared harness and lifecycle-report neutrality, lifecycle delegation, and an acyclic relative-import graph | Adding a client or root surface, crossing capability boundaries, or changing a composition root |
 | Local-only trace boundary | `scripts/check-local-trace-only.mjs` and its tests | Reviewed network-capable production modules, trace-core isolation, unreviewed trace-aware outbound bridges, and staged artifact/symlink containment | Moving or adding network code, trace-aware outbound code, or staged paths |
 | Package shape | npm package tests and package-build/check scripts | Executable wrappers, staged runtime layout, canonical source mapping, compatibility paths, and artifact allowlists | Changing entrypoints, packaging sources, materialization, or layout |
-| Harness integration coverage | `packages/npm/memorax-code/test/harness-coverage.test.mjs` | Discovered adapter packages match Backend client directories; runtime trees and the canonical Skill have npm source mappings; `make test` reaches every adapter suite | Adding a harness, changing adapter directory layout, source mapping, or test recipes |
+| Harness integration coverage | `packages/npm/memorax-code/test/harness-coverage.test.mjs` | Discovered adapter packages match Backend client directories; runtime trees and the canonical Skill have npm source mappings; `make test` reaches every adapter suite and the independent common and shared Skill suites | Adding a harness, changing adapter directory layout, source mapping, or test recipes |
 | Documentation contract | `scripts/check-docs.mjs` and its tests | Relative file targets in registered documentation, personal absolute paths, and shipped-document consistency | Adding a root document or changing document/package layout |
 | Platform-specific consumers | Repository scripts and platform harnesses | Explicit test paths, test-name patterns, and platform lifecycle scenarios | Moving, splitting, or renaming tests or platform entrypoints |
 
@@ -777,7 +777,9 @@ Harness integration checks discover `packages/ts/memorax-code-<client>-adapter`
 directories and require lowercase kebab-case client IDs rather than
 maintaining another client catalog. They check the
 existing Makefile recipe structure and source mappings, not installed-client
-behavior. Adapter `src`, `hooks`, `runtime-hooks`, and `scripts` directories
+behavior. The same gate requires the independent common and shared Skill
+targets to discover their tests recursively and remain reachable from `make test`.
+Adapter `src`, `hooks`, `runtime-hooks`, and `scripts` directories
 must be declared for staging. The local-only trace gate recognizes those
 runtime directories and shared Skill scripts for every adapter, including
 staged copies. Shared Skill copies map to the canonical Codex source for
@@ -965,9 +967,10 @@ authority for the `docs/` pages included in the npm package.
 
 Backend tests generally mirror capability ownership. They do not mirror every
 source file and are not divided first into unit and integration layers. Repo
-Memory is an existing cross-package exception: its core collection and
-validation tests live in the Codex adapter suite and exercise the compiled
-Backend helper through the canonical Skill launcher.
+Memory is a cross-package exception: its collection, validation, and update
+tests live in the repository-root `test/shared-skill` suite and exercise the
+compiled Backend helper through the canonical Skill launcher. Backend-relative
+paths are used below unless a different package or the repository root is named.
 
 | Backend source responsibility | Primary test area |
 | --- | --- |
@@ -977,8 +980,8 @@ Backend helper through the canonical Skill launcher.
 | `src/entrypoints` and root executable behavior | `test/entrypoints`; management-CLI lifecycle behavior in `test/lifecycle`; root allowlist in `test/architecture` |
 | `src/lifecycle` and `src/lifecycle/backend` | `test/lifecycle` and `test/lifecycle/backend` |
 | `src/memory` | `test/memory` |
-| `src/repo-memory` | Codex adapter `test/repo-memory-builder*.test.mjs` for collection and validation; other `test/repo-memory-*.test.mjs` files cover readers and orchestration |
-| `src/personal-memory` | `test/personal-memory`; canonical Skill launcher integration in Codex adapter tests |
+| `src/repo-memory` | Repository-root `test/shared-skill/repo-memory-builder*.test.mjs` and `repo-memory-updater.test.mjs` through the canonical Skill launcher |
+| `src/personal-memory` | `test/personal-memory`; canonical Skill launcher integration in repository-root `test/shared-skill` |
 | `src/provider/memorax` | `test/provider/memorax` |
 | `src/repository` | `test/repository` |
 | `src/shared` | `test/shared` |
@@ -996,19 +999,26 @@ Placement rules:
   belongs in `test/transport/http` and `test/app`.
 - Backend behavior tests build and exercise `dist`; architecture tests inspect
   `src` directly.
-- The Backend suite discovers nested tests recursively. Adapter suites
-  currently discover only flat `test/*.test.mjs`; their package scripts must
-  change before tests are nested.
-- Adapter-common has no standalone suite. Its changes are verified through all
-  affected consumers: Backend, all six adapters, and package checks when
+- Direct common contracts belong in
+  `packages/ts/memorax-code-adapter-common/test`. Canonical Skill guidance,
+  resources, and cross-package launcher integration belong in repository-root
+  `test/shared-skill`, even though the canonical Skill source remains in the
+  Codex adapter package. Native Hook wiring and consumer integration stay in
+  the corresponding adapter suites.
+- Backend, adapter-common, and shared Skill suites discover nested tests
+  recursively. The six adapter suites currently discover only flat
+  `test/*.test.mjs`; their package scripts must change before tests are nested.
+- Adapter-common and shared Skill suites have independent Make targets without
+  separate package manifests. Common changes also require affected consumer
+  coverage: Backend, shared Skill, all six adapters, and package checks when
   staged runtime layout is involved.
 - Before moving, splitting, or renaming tests, search `scripts` and `.github`
   for explicit paths and test-name patterns.
 
 Contributor-facing verification profiles are centralized in
 [CONTRIBUTING.md](CONTRIBUTING.md#verification-profiles), including the Backend
-build prerequisite for standalone Codex and CodeBuddy/WorkBuddy tests. Change
-routing uses those named profiles rather than copying commands here.
+build prerequisite for standalone shared Skill, Codex, and CodeBuddy/WorkBuddy
+tests. Change routing uses those named profiles rather than copying commands here.
 The [harness onboarding checklist](CONTRIBUTING.md#adding-a-harness)
 connects native authority, lifecycle reporting, packaging, and existing test
 contracts without introducing a separate adapter test framework.
@@ -1016,13 +1026,14 @@ contracts without introducing a separate adapter test framework.
 | Change surface | Primary evidence | Contracts to inspect | Verification profile |
 | --- | --- | --- | --- |
 | One Backend capability | Matching `test/<area>` | Source boundaries when imports change | Backend |
-| Repo Memory collection or validation | Codex adapter collector/validator tests against the compiled Backend helper | Source boundaries and canonical Skill launcher | Repo Memory |
+| Repo Memory collection, validation, or update | Shared Skill tests against the compiled Backend helper through the canonical launcher | Source boundaries and canonical Skill launcher | Repo Memory |
+| Shared Skill guidance, resources, or launchers | Repository-root `test/shared-skill` | Canonical source mapping and package shape when staged | Shared Skill; add Install/artifacts when staged runtime or package layout changes |
 | Runtime composition | `test/app` | Backend source boundaries | Backend |
 | Hook HTTP or adapter-visible command schema | `test/transport/http` and affected adapter suites | Backend source boundaries and package shape when staged | Backend + Adapter-common/shared Hook; add Install/artifacts when staged package shape changes |
 | Backend root entrypoint or compatibility facade | Entrypoint, architecture, and npm package tests | Source boundaries and package shape | Backend + Install/artifacts |
 | Client-native parsing or identity | `test/clients/<client>` | Source boundaries | Backend |
 | Client adapter plugin or Hook deployment | Matching adapter suite and affected Backend contract tests | Package shape when staged | Codex, Claude Code, DSH, OpenCode, CodeBuddy/WorkBuddy, or Trae; add Adapter-common/shared Hook for shared Hook source and Install/artifacts for staged package shape |
-| Adapter-common | Affected Backend tests and all six adapter suites | Package shape when staged layout changes | Adapter-common/shared Hook; add Install/artifacts when staged runtime or package layout changes |
+| Adapter-common | Direct common contracts and affected Backend, shared Skill, and adapter tests | Package shape when staged layout changes | Adapter-common/shared Hook; add Install/artifacts when staged runtime or package layout changes |
 | MemoraX provider, trace, or outbound transport | Matching Backend tests | Local-only trace boundary | Backend + Trace/local-only boundary |
 | Test relocation | Moved owning suite | Platform-specific consumers | Matching named profile |
 | Packaging/materialization | npm package tests and artifact gates | Package shape and local-only trace boundary | Install/artifacts |

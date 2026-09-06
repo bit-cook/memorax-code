@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { postBackendCommand } from "../../memorax-code-adapter-common/src/backend-command.mjs";
+import { postBackendCommand } from "../src/backend-command.mjs";
 
 const command = {
   connection: { url: "http://127.0.0.1:8787", token: "test-backend-token" },

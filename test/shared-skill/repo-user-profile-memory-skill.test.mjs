@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildRepoUserProfilePreferencesContext } from "../../memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs";
+import { buildRepoUserProfilePreferencesContext } from "../../packages/ts/memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs";
 
-const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../packages/ts/memorax-code-codex-adapter");
 const repoRoot = resolve(packageRoot, "../../..");
 const skillRoot = join(packageRoot, "skills", "memorax-code");
 const scriptPath = join(skillRoot, "scripts", "user-profile-memory.mjs");

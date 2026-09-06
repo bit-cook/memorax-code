@@ -252,21 +252,23 @@ and artifact changes require Install/artifacts in addition to affected suites.
 Run commands from the repository root. For stateful checks, use
 `memorax_dev` from [Isolated Development Environment](#isolated-development-environment)
 as the command prefix, or an equivalent isolated test environment. Complete
-Development Setup first. Codex and CodeBuddy/WorkBuddy suites require a current
-Backend build when run independently; `npm test` in either adapter does not
-produce it.
+Development Setup first. Shared Skill, Codex, and CodeBuddy/WorkBuddy suites
+require a current Backend build when run independently; their standalone test
+commands do not produce it. The common and shared Skill suites use the same
+Node test runner as the adapters and run through independent Make targets.
 
 | Profile | Required checks |
 | --- | --- |
 | Backend | `npm run typecheck --prefix packages/ts/memorax-code-backend` and `npm test --prefix packages/ts/memorax-code-backend` (builds before testing) |
+| Shared Skill | `npm run build --prefix packages/ts/memorax-code-backend`, then `make test-shared-skill`; add affected adapter profiles for native integration changes |
 | Codex | `npm run build --prefix packages/ts/memorax-code-backend`, then `npm test --prefix packages/ts/memorax-code-codex-adapter` |
 | Claude Code | `npm test --prefix packages/ts/memorax-code-claude-adapter` |
 | DeepSeek Harness (DSH) | `npm test --prefix packages/ts/memorax-code-dsh-adapter` |
 | OpenCode | `npm test --prefix packages/ts/memorax-code-opencode-adapter` |
 | CodeBuddy/WorkBuddy | `npm run build --prefix packages/ts/memorax-code-backend`, then `npm test --prefix packages/ts/memorax-code-codebuddy-adapter` |
 | Trae | `npm test --prefix packages/ts/memorax-code-trae-adapter` |
-| Repo Memory | Backend + Codex: core collector/validator cases live in the Codex adapter suite and use compiled Backend helpers; add other adapter profiles when their scheduling or launchers change |
-| Adapter-common/shared Hook | Affected Backend tests and all six adapter suites; add Install/artifacts when staged runtime or package layout changes. Adapter-common has no standalone suite. |
+| Repo Memory | Backend + Shared Skill: collector, validator, and updater cases use compiled Backend helpers through the canonical Skill launcher; add affected adapter profiles when their scheduling or launchers change |
+| Adapter-common/shared Hook | `make test-adapter-common`, affected Backend tests, and all six adapter suites; add Shared Skill for changes used by Skill readers or launchers and Install/artifacts when staged runtime or package layout changes |
 | Lifecycle report interpretation | Backend; add Install/artifacts for CLI or lifecycle behavior changes |
 | Trace/local-only boundary | Affected package tests plus `make test-npm-package` |
 | Documentation | `make docs-check` |

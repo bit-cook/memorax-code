@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { evaluateMemorySkillReminder } from "../../memorax-code-adapter-common/src/hooks/memory-skill-reminder-hook.mjs";
+import { evaluateMemorySkillReminder } from "../src/hooks/memory-skill-reminder-hook.mjs";
 import {
   isMemorySkillReminderDue,
   resolveMemorySkillReminderIntervalTurns,
-} from "../../memorax-code-adapter-common/src/hooks/memory-skill-reminder-policy.mjs";
+} from "../src/hooks/memory-skill-reminder-policy.mjs";
 
 test("shared reminder interval resolves environment, configuration, and defaults", async (t) => {
   const configured = "[memory.skill_reminder]\ninterval_turns = 2\n";

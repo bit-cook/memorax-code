@@ -4,6 +4,9 @@ import test from "node:test";
 import { npmMainSourceTrees } from "../../../../scripts/npm-source-files.mjs";
 
 const repoRoot = new URL("../../../../", import.meta.url);
+const makefile = await readFile(new URL("Makefile", repoRoot), "utf8");
+const recipes = new Map([...makefile.matchAll(/^([\w-]+):[^\n]*\n((?:\t[^\n]*(?:\n|$)|\r?\n)*)/gm)]
+  .map(([, target, recipe]) => [target, recipe.split(/\r?\n/).map((line) => line.trim())]));
 const packageEntries = await readdir(new URL("packages/ts/", repoRoot), { withFileTypes: true });
 const adapters = packageEntries
   .filter((entry) => entry.isDirectory() && /^memorax-code-.+-adapter$/.test(entry.name))
@@ -48,10 +51,7 @@ for (const { name, id } of adapters) {
 }
 
 test("make test reaches every discovered adapter test suite", async () => {
-  const makefile = await readFile(new URL("Makefile", repoRoot), "utf8");
   assert.ok(makefile.match(/^test:([^\n]*)/m)?.[1].split(/\s+/).includes("test-ts"), "make test must depend on test-ts");
-  const recipes = new Map([...makefile.matchAll(/^([\w-]+):[^\n]*\n((?:\t[^\n]*(?:\n|$)|\r?\n)*)/gm)]
-    .map(([, target, recipe]) => [target, recipe.split(/\r?\n/).map((line) => line.trim())]));
   for (const { name, id } of adapters) {
     const target = `test-${id}-adapter`;
     assert.ok(recipes.get("test-ts")?.includes(`$(MAKE) ${target}`), `${id}: test-ts must invoke ${target}`);
@@ -61,5 +61,20 @@ test("make test reaches every discovered adapter test suite", async () => {
     );
     const manifest = JSON.parse(await readFile(new URL(`packages/ts/${name}/package.json`, repoRoot), "utf8"));
     assert.ok(manifest.scripts?.test, `${id}: missing package test script`);
+  }
+});
+
+test("make test reaches independent common and shared Skill contracts", async () => {
+  for (const [target, directory] of [
+    ["test-adapter-common", "packages/ts/memorax-code-adapter-common/test"],
+    ["test-shared-skill", "test/shared-skill"],
+  ]) {
+    const entries = await readdir(new URL(`${directory}/`, repoRoot), { recursive: true, withFileTypes: true });
+    assert.ok(entries.some((entry) => entry.isFile() && entry.name.endsWith(".test.mjs")), `${target}: suite must contain tests`);
+    assert.ok(recipes.get("test-ts")?.includes(`$(MAKE) ${target}`), `test-ts must invoke ${target}`);
+    assert.ok(
+      recipes.get(target)?.includes(`node --test "${directory}/**/*.test.mjs"`),
+      `${target}: discover every shared contract recursively`,
+    );
   }
 });
