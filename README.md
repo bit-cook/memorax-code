@@ -281,11 +281,11 @@ memorax-code update
 
 Setup also enables background updates while the managed Backend is running.
 An update briefly stops a running managed Backend and restores it with the
-retained client selection; an already-stopped installation remains stopped.
+retained client selection.
 See [update settings](docs/configuration.md#setup-automatic-update-and-package-transition-state)
-for release channels, custom state roots, client selection, and disabling
-background checks. Restart or refresh a client after an update changes
-integration assets it has already loaded.
+for release channels, custom state roots, client selection, Backend restoration,
+and disabling background checks. Restart or refresh a client after an update
+changes integration assets it has already loaded.
 
 ### Windows Upgrade Note
 

@@ -177,16 +177,20 @@ record:
 $MEMORAX_CODE_HOME/runtime/install/automatic-update.json
 ```
 
-Replacing a running managed Backend uses a separate private record:
+Package replacement for a running managed Backend or retained DSH state uses
+a separate private record:
 
 ```text
 $MEMORAX_CODE_HOME/runtime/install/package-transition.json
 ```
 
 Preinstall records and retires the running installation. Postinstall restores
-and verifies it before consuming the record. A fresh or already-stopped
-installation has no transition and remains stopped. Direct npm installation
-does not run product reconciliation. Do not edit these runtime records by hand.
+and verifies it before consuming the record. Retained DSH state also triggers
+this sequence, even without a live Backend PID and even when that state is
+disabled; restoration invokes `start` with the retained client selection.
+Fresh or stopped installations without retained DSH state remain stopped.
+Direct npm installation does not run foreground setup. Do not edit these
+runtime records by hand.
 
 ## DeepSeek Harness integration paths
 

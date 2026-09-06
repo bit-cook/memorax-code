@@ -145,8 +145,9 @@ memorax-code stop --clients none
 npm install -g @memorax/memorax-code
 ```
 
-Fresh and already-stopped installations do not create a transition and remain
-stopped.
+Fresh and already-stopped installations without retained DSH state do not
+create a transition and remain stopped. Retained DSH state also triggers
+retirement and restoration, even without a live Backend PID.
 
 On Windows, a Backend started by MemoraX Code 0.1.6 or earlier from an npm
 lifecycle may keep the old global package directory as its working directory.

@@ -236,8 +236,8 @@ memorax-code update
 ```
 
 完成 setup 后，托管 Backend 运行期间也会自动检查并更新。更新会短暂停止运行中的托管 Backend，
-再按保留的客户端选择恢复；原本已停止的安装会保持停止。发布通道、自定义状态目录、客户端选择和关闭
-后台检查的方法见[更新配置](docs/configuration.md#setup-automatic-update-and-package-transition-state)。
+再按保留的客户端选择恢复。发布通道、自定义状态目录、客户端选择、Backend 恢复规则和关闭后台检查
+的方法见[更新配置](docs/configuration.md#setup-automatic-update-and-package-transition-state)。
 如果更新修改了运行中客户端已加载的集成资产，请重启或刷新客户端。
 
 ### Windows 升级提示
