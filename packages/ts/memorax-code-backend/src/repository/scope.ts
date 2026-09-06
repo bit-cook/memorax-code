@@ -18,6 +18,8 @@ export type RepositoryMemoryScopeFallbackReason = "git_metadata_invalid";
 export type RepositoryMemoryScope = Readonly<{
   schemaVersion: "workspace-memory-scope.v1";
   baseUserId: string;
+  // Same-named repositories may share the remote namespace in effectiveUserId.
+  // repositoryKey separately identifies the local scope used for session binding.
   effectiveUserId: string;
   repositoryKey: string;
   repositorySlug: string;
@@ -248,6 +250,9 @@ async function resolveGitRepository(workspace: string): Promise<GitRepositoryRes
       workspaceRoot: marker.workspaceRoot,
     };
   } catch (error) {
+    // Only a direct .git directory can anchor folder fallback for malformed or
+    // incomplete metadata. An invalid .git file pointer or a permission error
+    // leaves scope authority unverified, so resolution must fail closed.
     if (directDirectoryMarker && canFallbackFromDirectGitDirectory(error)) {
       return {
         kind: "degraded",
