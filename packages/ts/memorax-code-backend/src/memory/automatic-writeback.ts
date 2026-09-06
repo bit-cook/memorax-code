@@ -75,6 +75,8 @@ export type AutomaticMemoryWritebackRejectionReason =
   | "config_missing"
   | RepositoryMemoryScopeFailureReason;
 
+// Acceptance confirms local handling, including duplicates already accepted.
+// Callers may consume matching metadata; remote writeback can still fail.
 export type AutomaticMemoryWritebackEnqueueResult =
   | { accepted: true }
   | { accepted: false; reason: AutomaticMemoryWritebackRejectionReason };
@@ -98,6 +100,8 @@ export type AutomaticMemoryWritebackRuntimeOptions = {
 type AutomaticMemoryWritebackState = {
   diagnosticLogger: MemoryDiagnosticLogger;
   queueQuotaNotice?: (config: MemoraxAdapterConfig, quota: MemoraxQuotaSnapshot) => void;
+  // Tracks in-flight and recently successful writes in a bounded TTL cache.
+  // Success keeps keys to suppress replay; terminal failure releases them.
   pendingWritebacks: Map<string, number>;
   writebackBuffer: MemoryWritebackBufferRuntime;
   accepting: boolean;
@@ -272,6 +276,8 @@ function automaticMemoryWritebackDecision(
     role: "assistant",
     sessionKey,
   }, state.diagnosticLogger);
+  // Hashes and buffers must use the redacted text, before chunking can split
+  // sensitive patterns. Dispatch rechecks this invariant on full messages.
   const userRedaction = redactMemoryPayloadText(boundedUserText);
   const assistantRedaction = redactMemoryPayloadText(boundedAssistantText);
   logAutomaticMemoryPayloadRedaction(state, sessionKey, "user", rawUserText, userRedaction);

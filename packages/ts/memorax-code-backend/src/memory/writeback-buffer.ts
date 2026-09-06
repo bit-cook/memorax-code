@@ -296,6 +296,7 @@ function resetMemoryWritebackIdleTimer(
   const delayMs = Math.max(0, buffer.idleDeadlineAt - clock.now());
   buffer.timer = clock.setTimeout(() => {
     const current = writebackBuffers.get(buffer.bufferKey);
+    // Ignore callbacks from an older batch or a superseded idle deadline.
     if (current !== buffer || current.timerGeneration !== generation) return;
     flushMemoryWritebackBuffer(writebackBuffers, buffer.bufferKey, "idle_limit", deps);
   }, delayMs);
