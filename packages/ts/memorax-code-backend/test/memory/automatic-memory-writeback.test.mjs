@@ -473,7 +473,7 @@ test("automatic memory writeback deduplicates a successful replay within one run
   }
 });
 
-test("draining an automatic memory runtime flushes buffered turns and waits for provider settlement", async () => {
+test("draining an automatic memory runtime flushes buffered turns and waits for provider settlement", async (t) => {
   const requests = [];
   let notifyFetchStarted;
   let resolveFetch;
@@ -481,6 +481,10 @@ test("draining an automatic memory runtime flushes buffered turns and waits for 
     notifyFetchStarted = resolve;
   });
   const runtime = createAutomaticMemoryWritebackRuntime();
+  t.after(() => {
+    resolveFetch?.(memoraxSuccessResponse("automatic-memory-drain-cleanup"));
+    runtime.close();
+  });
   runtime.enqueue({
     client: "codex",
     sessionKey: "session-runtime-drain",
@@ -520,7 +524,7 @@ test("draining an automatic memory runtime flushes buffered turns and waits for 
   await draining;
   assert.equal(settled, true);
 
-  runtime.enqueue({
+  assert.deepEqual(runtime.enqueue({
     client: "codex",
     sessionKey: "session-runtime-drain-late",
     userText: "Do not accept work after drain begins.",
@@ -528,10 +532,8 @@ test("draining an automatic memory runtime flushes buffered turns and waits for 
     repositoryScope: REPOSITORY_SCOPE,
     env: WRITEBACK_ENV,
     fetchImpl: memoraxFetch(requests),
-  });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  }), { accepted: false, reason: "runtime_closed" });
   assert.equal(requests.length, 1);
-  runtime.close();
 });
 
 test("closing an automatic memory runtime cancels its buffered flush", async () => {

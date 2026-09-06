@@ -965,6 +965,7 @@ test("setup detects memory preferences before writing MemoraX config", async () 
     assert.match(run.result.stderr, /Automatic writeback: .*Enabled/);
     assert.match(run.log, /^memorax-code start --clients codex,claude,dsh$/m);
     assert.match(run.log, /^memorax-cli status --json --config-only$/m);
+    assert.match(run.log, /^trial-provision$/m);
     assert.ok(run.log.indexOf("trial-provision") < run.log.indexOf("memorax-code start --clients codex,claude,dsh"));
     assert.equal(`${run.result.stdout}\n${run.result.stderr}\n${run.log}`.includes(trialApiKey), false);
     assert.equal(run.memoraxRequests.length, 0);

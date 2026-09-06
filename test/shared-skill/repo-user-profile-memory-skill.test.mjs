@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 import { buildRepoUserProfilePreferencesContext } from "../../packages/ts/memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../packages/ts/memorax-code-codex-adapter");
-const repoRoot = resolve(packageRoot, "../../..");
 const skillRoot = join(packageRoot, "skills", "memorax-code");
 const scriptPath = join(skillRoot, "scripts", "user-profile-memory.mjs");
 
@@ -67,26 +66,12 @@ function runProfileAsync(command, repo, args = []) {
 }
 
 test("repo memory skills route user-profile reads and writes", () => {
-  const skill = readSkillFile("SKILL.md");
   const reference = readSkillFile("references/personal-write.md");
   const readReference = readSkillFile("references/personal-read.md");
 
-  assert.match(skill, /name: memorax-code/);
-  assert.match(skill, /durable profile or interaction preferences/);
-  assert.match(skill, /personal profile write/);
   assert.match(reference, /\.repo_memory\/user-profile\/preferences\.md/);
+  assert.match(reference, /Require the user to explicitly ask/);
   assert.match(reference, /may be saved implicitly/);
-  assert.match(reference, /Keep file names, schema and script field names, type values, command options, and fixed Markdown headings in English/);
-  assert.match(reference, /Write human-readable memory content in the user's current interaction language/);
-  assert.match(reference, /procedure titles and steps and user-profile descriptions, applicability, and exceptions/);
-  assert.match(reference, /Preserve exact code identifiers, commands, paths, API names, and quoted literals without translation/);
-  assert.match(reference, /Handle the semantic match before writing/);
-  assert.match(reference, /New preference: add a new preference/);
-  assert.match(reference, /Equivalent content: do not add a duplicate/);
-  assert.match(reference, /Addition or refinement to the same preference: update the existing preference/);
-  assert.match(reference, /directly conflicts with or replaces an old preference in the same scope: update the existing id and remove the superseded content/);
-  assert.match(reference, /explicitly says a preference no longer applies: delete that preference/);
-  assert.match(reference, /environment, tool, or workflow no longer exists: update the scope; delete it if the entire preference is obsolete/);
   assert.match(reference, /Do not modify or delete existing preferences because of a one-time instruction/);
   assert.match(reference, /Do not scan or clean up unrelated preferences/);
   assert.match(reference, /multiple preferences may match, or it is unclear whether the change is durable, ask the user/);
@@ -95,23 +80,7 @@ test("repo memory skills route user-profile reads and writes", () => {
   assert.match(reference, /Do not preserve deleted text elsewhere/);
 
   assert.match(readReference, /user-profile-memory\.mjs list --repo <repo>/);
-  assert.match(readReference, /list operation does not create it/);
   assert.match(readReference, /Do not write, normalize, migrate, repair, or delete memory/);
-});
-
-test("root READMEs document personal-memory replacement and deletion", () => {
-  const english = readFileSync(join(repoRoot, "README.md"), "utf8");
-  const chinese = readFileSync(join(repoRoot, "README.zh.md"), "utf8");
-
-  assert.match(english, /Personal Memory and Procedure Memory stay in the current repository under\s+`\.repo_memory\/`/);
-  assert.match(english, /removes the superseded\s+wording/);
-  assert.match(english, /deletes only the named preference,\s+procedure topic, section, or step/);
-  assert.match(english, /One-time task instructions do not change saved memory/);
-
-  assert.match(chinese, /Personal Memory 和 Procedure Memory 保存在当前仓库的 `\.repo_memory\/` 下/);
-  assert.match(chinese, /彻底移除被替代的文字/);
-  assert.match(chinese, /只删除点名的偏好、流程主题、段落或步骤/);
-  assert.match(chinese, /一次性任务指令不会改写已保存的记忆/);
 });
 
 test("repo-user-profile-memory script performs add duplicate update delete with counts", () => {

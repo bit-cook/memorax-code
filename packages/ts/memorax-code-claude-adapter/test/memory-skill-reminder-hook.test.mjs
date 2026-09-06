@@ -322,6 +322,10 @@ test("Claude injects profile and procedure memory on the shared cadence and afte
     for (const index of [1, 2, 3, 4]) assert.equal(outputs[index].stdout, "");
 
     const firstContext = reminderContext(outputs[0].stdout);
+    assert.ok(firstContext.includes(MEMORY_REMINDER_CONTEXT));
+    assert.ok(firstContext.includes(PERSONAL_MEMORY_REMINDER_CONTEXT));
+    assert.ok(firstContext.includes("Active repo-scoped user preferences"));
+    assert.ok(firstContext.includes("Active repo-scoped procedure memories"));
     assert.ok(firstContext.indexOf(MEMORY_REMINDER_CONTEXT) < firstContext.indexOf(PERSONAL_MEMORY_REMINDER_CONTEXT));
     assert.ok(firstContext.indexOf(PERSONAL_MEMORY_REMINDER_CONTEXT) < firstContext.indexOf("Active repo-scoped user preferences"));
     assert.ok(firstContext.indexOf("Active repo-scoped user preferences") < firstContext.indexOf("Active repo-scoped procedure memories"));

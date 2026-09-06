@@ -15,17 +15,21 @@ const jobDriver = fileURLToPath(new URL("./support/repo-memory-job-driver.mjs", 
 const fixtureRunner = fileURLToPath(new URL("./support/repo-memory-job-runner.mjs", import.meta.url));
 const workerPath = fileURLToPath(new URL("../src/repo-memory/repo-memory-job-worker.mjs", import.meta.url));
 
+const inheritedJobEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => (
+  !/^(MEMORAX_CODE_REPO_MEMORY_|REPO_MEMORY_TEST_)/i.test(key)
+)));
+
 function runJob(args, env = {}) {
   return spawnSync(process.execPath, [jobDriver, ...args], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...inheritedJobEnv, ...env },
   });
 }
 
 function runJobAsync(args, env = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [jobDriver, ...args], {
-      env: { ...process.env, ...env },
+      env: { ...inheritedJobEnv, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
