@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { renderDefaultMemoraxCodeConfig } from "../../dist/config/memorax-code.js";
-import { isProcessAlive, terminateProcessTree } from "../../dist/lifecycle/backend/service.js";
+import { isProcessAlive } from "../../dist/lifecycle/backend/service.js";
 import { freePort } from "../support/helpers.mjs";
 import {
   readSetupCompletionRecord,
@@ -17,7 +17,7 @@ import {
   prepareActiveCodexPlugin,
   prepareClaudePluginCli,
   runCli,
-  waitForProcessExit,
+  terminateFixtureBackends,
   writeManagedClientsConfig,
 } from "./support/backend-service-fixtures.mjs";
 
@@ -274,7 +274,7 @@ test("start recovers the Backend when Codex preparation fails after shutdown", a
   const port = await freePort();
   const cliPath = fileURLToPath(new URL("../../dist/memorax-code.js", import.meta.url));
   const codexStatePath = join(home, "adapters", "codex", "state.json");
-  const observedPids = new Set();
+  const observedBackends = new Map();
   const commonArgs = [
     "--home", home,
     "--port", String(port),
@@ -286,7 +286,8 @@ test("start recovers the Backend when Codex preparation fails after shutdown", a
       "start", "--json", ...commonArgs, "--clients", "codex",
     ]);
     assert.equal(initial.code, 0, `${initial.stdout}\n${initial.stderr}`);
-    observedPids.add(JSON.parse(initial.stdout).backend.state.pid);
+    const initialState = JSON.parse(initial.stdout).backend.state;
+    observedBackends.set(initialState.pid, initialState);
 
     await rm(codexStatePath, { force: true });
     await mkdir(codexStatePath);
@@ -305,7 +306,7 @@ test("start recovers the Backend when Codex preparation fails after shutdown", a
       report.backend.reason,
       "codex_adapter_enable_failed_backend_recovered",
     );
-    observedPids.add(report.backend.state.pid);
+    observedBackends.set(report.backend.state.pid, report.backend.state);
     const health = await fetch(`http://127.0.0.1:${port}/health`).then(
       (response) => response.json(),
     );
@@ -314,13 +315,12 @@ test("start recovers the Backend when Codex preparation fails after shutdown", a
   } finally {
     await rm(codexStatePath, { recursive: true, force: true });
     await runCli(cliPath, ["stop", "--json", ...commonArgs, "--clients", "none"]);
-    for (const pid of observedPids) {
-      if (!Number.isSafeInteger(pid) || !isProcessAlive(pid)) continue;
-      terminateProcessTree(pid);
-      await waitForProcessExit(pid);
+    try {
+      await terminateFixtureBackends(observedBackends.values());
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(codexHome, { recursive: true, force: true });
     }
-    await rm(home, { recursive: true, force: true });
-    await rm(codexHome, { recursive: true, force: true });
   }
 });
 
@@ -330,7 +330,7 @@ test("start recovers the Backend when CodeBuddy preparation fails after shutdown
   const codeBuddyHome = join(root, "blocked-codebuddy-home");
   const port = await freePort();
   const cliPath = fileURLToPath(new URL("../../dist/memorax-code.js", import.meta.url));
-  const observedPids = new Set();
+  const observedBackends = new Map();
   const commonArgs = ["--home", home, "--port", String(port)];
   await writeFile(codeBuddyHome, "not a directory\n");
   try {
@@ -338,7 +338,8 @@ test("start recovers the Backend when CodeBuddy preparation fails after shutdown
       "start", "--json", ...commonArgs, "--clients", "none",
     ]);
     assert.equal(initial.code, 0, `${initial.stdout}\n${initial.stderr}`);
-    observedPids.add(JSON.parse(initial.stdout).backend.state.pid);
+    const initialState = JSON.parse(initial.stdout).backend.state;
+    observedBackends.set(initialState.pid, initialState);
 
     const failed = await runCli(cliPath, [
       "start", "--json", ...commonArgs,
@@ -358,7 +359,7 @@ test("start recovers the Backend when CodeBuddy preparation fails after shutdown
       report.backend.reason,
       "codebuddy_adapter_enable_failed_backend_recovered",
     );
-    observedPids.add(report.backend.state.pid);
+    observedBackends.set(report.backend.state.pid, report.backend.state);
     const health = await fetch(`http://127.0.0.1:${port}/health`).then(
       (response) => response.json(),
     );
@@ -366,12 +367,11 @@ test("start recovers the Backend when CodeBuddy preparation fails after shutdown
     assert.equal(health.instanceId, report.backend.state.instanceId);
   } finally {
     await runCli(cliPath, ["stop", "--json", ...commonArgs, "--clients", "none"]);
-    for (const pid of observedPids) {
-      if (!Number.isSafeInteger(pid) || !isProcessAlive(pid)) continue;
-      terminateProcessTree(pid);
-      await waitForProcessExit(pid);
+    try {
+      await terminateFixtureBackends(observedBackends.values());
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
-    await rm(root, { recursive: true, force: true });
   }
 });
 

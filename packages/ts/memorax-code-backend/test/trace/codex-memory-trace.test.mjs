@@ -764,35 +764,49 @@ test("retention keeps sessions with fresh trace files even when directory mtime 
 
 test("append path honors cross-process retention debounce marker", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-trace-retention-debounce-"));
+  const now = new Date("2026-07-09T00:00:00.000Z");
+  const oldTime = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
   try {
-    const oldDir = tracePaths(root).sessionDir("old-session");
-    await mkdir(oldDir, { recursive: true });
-    await writeFile(join(oldDir, "events.jsonl"), "{}\n", "utf8");
-    const oldTime = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-    await utimes(oldDir, oldTime, oldTime);
-    await mkdir(tracePaths(root).root, { recursive: true });
-    await writeFile(join(tracePaths(root).root, ".retention-cleanup.json"), JSON.stringify({
-      cleaned_at: new Date().toISOString(),
-    }), "utf8");
+    for (const hasMarker of [true, false]) {
+      const home = join(root, hasMarker ? "fresh-marker" : "no-marker");
+      const paths = tracePaths(home);
+      const oldDir = paths.sessionDir("old-session");
+      const oldEvents = paths.eventsJsonl("old-session");
+      await mkdir(oldDir, { recursive: true });
+      await writeFile(oldEvents, "{}\n", "utf8");
+      await utimes(oldEvents, oldTime, oldTime);
+      await utimes(oldDir, oldTime, oldTime);
+      if (hasMarker) {
+        const markerPath = join(paths.root, ".retention-cleanup.json");
+        await writeFile(markerPath, JSON.stringify({ cleaned_at: now.toISOString() }), "utf8");
+        await utimes(markerPath, now, now);
+      }
 
-    await recordCodexTraceEvent({
-      memoraxCodeHome: root,
-      config: {
-        enabled: true,
-        captureContent: true,
-        retentionDays: 1,
-        maxEventChars: 20_000,
-        maxFileBytes: 52_428_800,
-      },
-      traceContext: traceContextFromHookBody({ session_id: "new-session" }),
-      type: "memory_retrieve",
-      source: "automatic_retrieval",
-      operation: "retrieve",
-      ok: true,
-      request: { query: "do not scan every CLI append" },
-    });
+      const result = await recordCodexTraceEvent({
+        memoraxCodeHome: home,
+        config: {
+          enabled: true,
+          captureContent: true,
+          retentionDays: 1,
+          maxEventChars: 20_000,
+          maxFileBytes: 52_428_800,
+        },
+        traceContext: traceContextFromHookBody({ session_id: "new-session" }),
+        type: "memory_retrieve",
+        source: "automatic_retrieval",
+        operation: "retrieve",
+        ok: true,
+        request: { query: "do not scan every CLI append" },
+        now: () => now,
+      });
 
-    await stat(oldDir);
+      assert.deepEqual(result, { written: true, path: paths.eventsJsonl("new-session") });
+      if (hasMarker) {
+        assert.equal(await readFile(oldEvents, "utf8"), "{}\n");
+      } else {
+        await assert.rejects(stat(oldDir), { code: "ENOENT" });
+      }
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

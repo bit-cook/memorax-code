@@ -9,6 +9,8 @@ import {
   activateClientHookRuntimeGeneration,
   stageClientHookRuntimeGeneration,
 } from "../../../memorax-code-adapter-common/src/hooks/hook-runtime-generation.mjs";
+import { withJsonFileLockAsync } from "../../../memorax-code-adapter-common/src/config-utils.mjs";
+import { backendLifecycleLockTarget } from "../../dist/lifecycle/lock.js";
 import { startMemoraxCodeService } from "../../dist/lifecycle/orchestrator.js";
 import { freePort } from "../support/helpers.mjs";
 
@@ -164,20 +166,29 @@ test("ready-state commits remain ordered inside the lifecycle lock", async () =>
   const holdFirstCommit = new Promise((resolve) => {
     releaseFirstCommit = resolve;
   });
+  let first;
+  let second;
   try {
-    const first = startMemoraxCodeService({ home, port }, argv, async () => {
+    first = startMemoraxCodeService({ home, port }, argv, async () => {
       commits.push("B:entered");
       markFirstCommitEntered();
       await holdFirstCommit;
       commits.push("B:committed");
     });
-    await firstCommitEntered;
+    await Promise.race([firstCommitEntered, first]);
+    assert.deepEqual(commits, ["B:entered"], "the first lifecycle must reach its ready-state commit");
+    await assert.rejects(
+      withJsonFileLockAsync(backendLifecycleLockTarget({ home }), () => {}, {
+        timeoutMs: 100,
+        retryMs: 10,
+      }),
+      { code: "JSON_FILE_LOCK_TIMEOUT" },
+      "another writer must not acquire the lifecycle lock while the ready-state commit is pending",
+    );
 
-    const second = startMemoraxCodeService({ home, port }, argv, () => {
+    second = startMemoraxCodeService({ home, port }, argv, () => {
       commits.push("C:committed");
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.deepEqual(commits, ["B:entered"]);
 
     releaseFirstCommit();
     const [firstReport, secondReport] = await Promise.all([first, second]);
@@ -186,6 +197,7 @@ test("ready-state commits remain ordered inside the lifecycle lock", async () =>
     assert.deepEqual(commits, ["B:entered", "B:committed", "C:committed"]);
   } finally {
     releaseFirstCommit?.();
+    await Promise.allSettled([first, second]);
     await runCli(["stop", "--json", "--home", home, "--port", String(port), "--clients", "none"]);
     await rm(root, { recursive: true, force: true });
   }
