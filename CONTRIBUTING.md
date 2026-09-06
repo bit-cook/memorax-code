@@ -6,25 +6,114 @@ change.
 
 ## Development Setup
 
-Source development requires:
-
-- Git
-- Node.js 24 and npm
-- Python 3
-- `make` on macOS/Linux or PowerShell 7+ on Windows for platform scripts
-
-Start from a clean checkout and install the Backend dependencies:
+Run the commands below from the repository root. Source development requires
+Git, Node.js 24 with npm, Python 3 (`python3`), GNU Make, Bash, `curl`, and standard
+Unix command-line tools. The Makefile and package gates invoke Bash scripts,
+so PowerShell alone is insufficient. Use macOS or Linux for these examples.
+If using WSL on Windows, keep the checkout and Node, npm, Git, and Python in
+the Linux environment; those results cover Linux behavior, not native Windows.
+Native Windows checks use Windows Node.js and PowerShell 7+ where required by
+the platform scripts. See [Validation](#validation) for their scope.
 
 ```bash
 git status --short --branch
 npm ci --prefix packages/ts/memorax-code-backend
+npm run build --prefix packages/ts/memorax-code-backend
 ```
 
-Do not commit credentials, `.env.local`, local client transcripts, MemoraX
-content, generated trace data, package staging, or machine-specific paths.
-Use isolated MemoraX Code state and all affected client homes for lifecycle,
-install, migration, or destructive tests. Follow the environment-isolation
-rules in [Verification](AGENTS.md#5-verification).
+Backend compilation produces the `dist/` entrypoints consumed by its tests and
+by some adapter tests. Rebuild after TypeScript changes. Adapters use JavaScript
+source; their package test scripts do not build the Backend for you.
+
+### Isolated Development Environment
+
+Use temporary state for lifecycle, install, migration, and destructive tests.
+The following Bash session defines a command wrapper for the examples below.
+It leaves the shell's own home unchanged and starts child commands with a clean
+environment, so inherited credentials, command overrides, and client-home
+aliases do not select existing developer state.
+
+```bash
+memorax_dev_root="$(mktemp -d)"
+mkdir -p "$memorax_dev_root"/{user,state,tmp}
+memorax_dev() {
+  env -i PATH="$PATH" \
+    HOME="$memorax_dev_root/user" \
+    MEMORAX_CODE_HOME="$memorax_dev_root/state" \
+    npm_config_cache="$memorax_dev_root/npm-cache" \
+    TMPDIR="$memorax_dev_root/tmp" \
+    "$@"
+}
+```
+
+The clean environment removes inherited client-home aliases, XDG paths,
+credentials, and `MEMORAX_CODE_*_COMMAND` overrides; default client paths then
+resolve under the temporary home. Let each test set its own fixture overrides.
+Do not prepopulate competing overrides: for example, a global `CODEBUDDY_HOME`
+would override a test's own `WORKBUDDY_HOME` fixture.
+
+For direct lifecycle experiments, isolate every affected client's home and
+inject synthetic command fixtures. The primary overrides are `CODEX_HOME`,
+`CLAUDE_CONFIG_DIR`, `DSH_HOME`, `OPENCODE_CONFIG_DIR`, `CODEBUDDY_HOME`, and
+`TRAE_CN_HOME`; account for the aliases `CLAUDE_HOME`, `WORKBUDDY_HOME`, and
+`TRAE_HOME` as well. `PATH` still contains installed programs, so a temporary
+home alone does not prevent real-client execution. Inspect the affected path
+and command resolvers when adding a client or changing discovery.
+
+Native Windows isolation also needs temporary `USERPROFILE`, `APPDATA`, and
+`LOCALAPPDATA`, while retaining system variables required to launch Windows
+tools. An isolated home does not isolate the operating system's credential
+store; its integration checks remain opt-in. Do not copy credentials,
+`.env.local`, client transcripts, real MemoraX content, or retained traces into
+fixtures; keep temporary state outside Git.
+
+### Run and Debug Source
+
+Build once, then run a focused test through the isolated wrapper. Backend tests
+exercise compiled output; running `node --test` directly does not compile it.
+For example:
+
+```bash
+memorax_dev node --test --test-timeout=5000 --test-force-exit \
+  packages/ts/memorax-code-backend/test/transport/http/memory-hook.test.mjs
+```
+
+To select a case, add `--test-name-pattern='text from the test name'` before
+the file path. To debug that case, use `node --inspect-brk --test
+--test-concurrency=1` with the pattern and path, attach a Node debugger, and omit
+`--test-timeout`/`--test-force-exit` while paused.
+
+For foreground HTTP development, choose a free local port and run:
+
+```bash
+memorax_dev env MEMORAX_CODE_BACKEND_HOST=127.0.0.1 \
+  MEMORAX_CODE_BACKEND_PORT=18787 \
+  MEMORAX_CODE_AUTO_UPDATE=false \
+  MEMORAX_CODE_MEMORAX_WRITEBACK_ENABLED=false \
+  node packages/ts/memorax-code-backend/dist/server.js
+```
+
+From another terminal, `curl --fail http://127.0.0.1:18787/health` should return
+JSON with `ok: true` and `service: "memorax-code-backend"`. This raw server
+exercises the HTTP process without installing client integrations or running
+foreground account setup. Stop it with Ctrl-C before cleaning the isolated
+state. For lifecycle behavior, extend the existing synthetic lifecycle tests
+and run the Install/artifacts profile instead of attaching this server to live
+client configuration.
+
+During editing, `npm run dev --prefix packages/ts/memorax-code-backend` watches
+TypeScript and rebuilds `dist/`. The foreground command can use `node --watch`
+to restart on compiled changes. Keep the same isolated environment for each
+process; use `--inspect` when debugging the foreground server.
+
+After stopping development processes and any test-spawned children, remove
+only this session's temporary state:
+
+```bash
+rm -rf "$memorax_dev_root"
+unset -f memorax_dev
+unset memorax_dev_root
+```
 
 ## Repository Ownership
 
@@ -60,20 +149,19 @@ Current source and executable tests remain authoritative for behavior.
 
 | Document | Owns | Update when |
 | --- | --- | --- |
-| [README](README.md) and [Chinese README](README.zh.md) | Product overview, supported-client entry, requirements, ordinary installation, account or guest setup, required client activation, success verification, first-use walkthrough, and navigation | Entry information or ordinary onboarding changes; keep both languages synchronized. Detailed configuration, recovery, or internal requirements alone do not require a README edit. |
+| [README](README.md) and [Chinese README](README.zh.md) | Product overview, supported-client entry, requirements, ordinary installation, account or guest setup, required client activation, success verification, first-use walkthrough, routine update/uninstall, and navigation | Entry information or ordinary onboarding changes; keep both languages synchronized. Detailed configuration, recovery, or internal requirements alone do not require a README edit. |
 | [npm README](packages/npm/memorax-code/README.md) | A standalone npm entrypoint and links to the detailed guides | The published package's quick start or navigation changes |
-| [Installation](INSTALL.md) | Complete installation, setup, upgrade, and removal reference, including client activation and advanced or special-environment procedures | A user must perform different setup or lifecycle steps |
 | [Configuration](docs/configuration.md) | Settings, defaults, paths, selection and update semantics | Configuration meaning or runtime configuration behavior changes |
 | [Troubleshooting](docs/troubleshooting.md) | Symptoms, diagnosis, and recovery steps | A diagnosis or recovery procedure changes |
 | [Architecture](ARCHITECTURE.md) | Package and capability ownership, runtime flows, authority, dependencies, packaging boundaries, and test placement | A documented boundary changes; use its [maintenance criteria](ARCHITECTURE.md#9-maintaining-this-document) |
-| [Agent guide](AGENTS.md) | Coding-agent rules, invariants, the complete verification profiles, and Git handoff | Working rules or verification requirements change |
-| [Contributor guide](CONTRIBUTING.md) | Human contributor workflow, documentation routing, and the harness onboarding checklist | The contribution or onboarding workflow changes |
+| [Agent guide](AGENTS.md) | Mandatory agent constraints, runtime and data invariants, and Git permissions | An agent working rule or invariant changes |
+| [Contributor guide](CONTRIBUTING.md) | Shared developer entrypoint: source setup, isolation, running/debugging, verification profiles, harness onboarding, documentation routing, and PR workflow | A development or verification procedure changes |
 | [Security policy](SECURITY.md) | Vulnerability reporting, trust policy, and data-protection guarantees | A security or trust boundary changes; implementation maps link to this policy |
 | [Changelog](CHANGELOG.md) | Notable user-facing release changes | Recording a release or its pending notes; internal-only refactors and tests normally do not need an entry |
 | [Canonical shared Skill](packages/ts/memorax-code-codex-adapter/skills/memorax-code/SKILL.md) and its references | Product instructions consumed by coding clients | Agent-facing product behavior changes; preserve shared materialization and keep maintainer runbooks out of the Skill |
 
-Keep detailed settings in Configuration and troubleshooting procedures in
-Troubleshooting even when Installation links to them. Preserve existing links
+Keep detailed settings in Configuration and recovery procedures in
+Troubleshooting; README links to these when they are needed. Preserve existing links
 and heading anchors when reorganizing a document. The `docs/` pages included
 in the npm artifact are declared by
 [shipped-docs.json](packages/npm/memorax-code/shipped-docs.json); update its
@@ -115,7 +203,10 @@ and recovery cases in that client's tests.
    materialization in [npm source mapping](scripts/npm-source-files.mjs).
    Check artifact requirements in [package building](scripts/build-npm-packages.mjs),
    [packed-file validation](scripts/validate-npm-pack-json.mjs), and
-   [installed-package checks](scripts/npm-package-check.sh). Run the adapter's
+   [installed-package checks](scripts/npm-package-check.sh). Register the package
+   and any versioned plugin/Hook manifests in
+   [release-version targets](scripts/sync-release-version.mjs), so the shared
+   release version remains consistent. Run the adapter's
    tests against its deployed layout as appropriate; do not maintain a new
    independent Skill copy. The
    [harness coverage check](packages/npm/memorax-code/test/harness-coverage.test.mjs)
@@ -133,7 +224,7 @@ and recovery cases in that client's tests.
    requires updating the scan and source-mapping checks. Add the adapter
    suite to the repository and platform checks, update architecture and public
    client documentation, and run the relevant
-   [verification profiles](AGENTS.md#5-verification).
+   [verification profiles](#verification-profiles).
 
 ### Harness Coverage Map
 
@@ -149,16 +240,58 @@ or platform verification. Keep new behavior cases in the owning suites.
 
 ## Validation
 
-Choose checks by impact from the complete
-[verification profiles](AGENTS.md#5-verification). For architecture changes,
+Choose checks by impact from the profiles below. For architecture changes,
 the [change-routing table](ARCHITECTURE.md#8-test-architecture-and-change-routing)
-maps the affected boundary to its owning tests and named profiles. Documentation
-edits also require the Documentation profile; CLI, lifecycle, and artifact
-changes require the Install/artifacts profile in addition to affected suites.
+maps boundaries to owning tests and named profiles. Focused tests shorten the
+edit loop; complete all profiles required by the final change before handoff.
+Documentation edits also require the Documentation profile; CLI, lifecycle,
+and artifact changes require Install/artifacts in addition to affected suites.
 
-Real-client or MemoraX-backed checks must be explicit opt-in tests with
-redacted output. Public fixtures must never contain real API keys, private
-transcripts, personal memory, or internal infrastructure credentials.
+### Verification Profiles
+
+Run commands from the repository root. For stateful checks, use
+`memorax_dev` from [Isolated Development Environment](#isolated-development-environment)
+as the command prefix, or an equivalent isolated test environment. Complete
+Development Setup first. Codex and CodeBuddy/WorkBuddy suites require a current
+Backend build when run independently; `npm test` in either adapter does not
+produce it.
+
+| Profile | Required checks |
+| --- | --- |
+| Backend | `npm run typecheck --prefix packages/ts/memorax-code-backend` and `npm test --prefix packages/ts/memorax-code-backend` (builds before testing) |
+| Codex | `npm run build --prefix packages/ts/memorax-code-backend`, then `npm test --prefix packages/ts/memorax-code-codex-adapter` |
+| Claude Code | `npm test --prefix packages/ts/memorax-code-claude-adapter` |
+| DeepSeek Harness (DSH) | `npm test --prefix packages/ts/memorax-code-dsh-adapter` |
+| OpenCode | `npm test --prefix packages/ts/memorax-code-opencode-adapter` |
+| CodeBuddy/WorkBuddy | `npm run build --prefix packages/ts/memorax-code-backend`, then `npm test --prefix packages/ts/memorax-code-codebuddy-adapter` |
+| Trae | `npm test --prefix packages/ts/memorax-code-trae-adapter` |
+| Repo Memory | Backend + Codex: core collector/validator cases live in the Codex adapter suite and use compiled Backend helpers; add other adapter profiles when their scheduling or launchers change |
+| Adapter-common/shared Hook | Affected Backend tests and all six adapter suites; add Install/artifacts when staged runtime or package layout changes. Adapter-common has no standalone suite. |
+| Lifecycle report interpretation | Backend; add Install/artifacts for CLI or lifecycle behavior changes |
+| Trace/local-only boundary | Affected package tests plus `make test-npm-package` |
+| Documentation | `make docs-check` |
+| Install/artifacts | `make npm-package-check` |
+| Broad cross-layer | `make test`; add Install/artifacts when staging or layout changes |
+
+Do not rerun an identical prerequisite build if the Backend profile has already
+built the same source. Rebuild whenever TypeScript changes. The Documentation
+profile checks local link targets, public paths, and shipped-document consistency;
+its README synchronization script compares committed Git refs, so also review
+uncommitted README changes in both languages. These checks do not prove prose
+accuracy or command behavior.
+
+Native Windows package smoke coverage lives in
+[windows-npm-package-e2e.mjs](scripts/windows-npm-package-e2e.mjs). The separate
+[Codex](scripts/windows-codex-e2e.mjs) and
+[Claude](scripts/windows-claude-e2e.mjs) runners use real clients. Inspect each
+script's prerequisites and isolation before using it; a macOS/Linux suite or
+WSL run does not replace native Windows validation.
+
+Real-client or MemoraX-backed checks are explicit opt-in tests. Report them
+separately from synthetic tests, record platform and scenarios, redact output,
+and explain any relevant checks not run. Public fixtures must never contain
+real API keys, private transcripts, personal memory, or infrastructure
+credentials.
 
 ## Pull Requests
 

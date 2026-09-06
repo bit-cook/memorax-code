@@ -222,6 +222,59 @@ search. Automatic writeback requires `[memory.writeback] enabled = true` and
 must not be disabled by
 `MEMORAX_CODE_MEMORAX_WRITEBACK_ENABLED=false`.
 
+## Hook ran, but automatic writeback is missing
+
+`hook-runtime=observed` confirms that a managed Hook loaded. It does not prove
+that a completed turn reached MemoraX. Check each stage in order:
+
+1. Run `memorax-cli status` from the same project and check automatic writeback,
+   credentials, and workspace scope. Compare the Backend and client's actual
+   environment with [writeback settings](configuration.md#writeback-and-explicit-add).
+   A status command in a different shell cannot inspect their inherited
+   overrides. Automatic Search being disabled does not disable writeback.
+2. Confirm that the session has a completed turn with matching native content.
+   Codex and Claude diagnostics such as `turn_id_missing`, `prompt_id_missing`,
+   `transcript_unavailable`, `transcript_session_mismatch`, or `turn_not_found`
+   identify correlation or native-history failures. Restore the client's
+   access to its own history and retry in a new session; do not substitute a
+   Hook's message text or another client's transcript. For Trae, completion
+   instead requires its validated `UserPromptSubmit`/`Stop` pair.
+3. Check whether the turn was rejected before buffering. In
+   `memory.automatic_writeback`, `skipReason=disabled` means the effective
+   settings rejected it; `workspace_scope_*` reasons require the scope checks
+   below. `user_prompt_empty` and `assistant_text_empty` can also mean that
+   redaction left no meaningful content. `duplicate_pending` and
+   `buffer_duplicate_turn` indicate duplicate handling, not a new send failure.
+4. Distinguish buffering from sending. `buffered=true` with `scheduled=false`
+   is expected: defaults flush at eight turns, ten minutes idle since the most
+   recent buffered turn, or the 128,000-character buffer boundary. A flush logs
+   `scheduled=true` and `flushReason` such as `turn_limit`, `idle_limit`, or
+   `char_limit`. A Hook's `scheduled=true` can mean the shared runtime accepted
+   the turn into this buffer; it is not a remote receipt.
+5. Inspect the subsequent `memory.automatic_writeback` dispatch result.
+   `accepted=false`, `httpStatus`, `errorKind`, and `retrying` distinguish
+   rejected requests and transport retries. `accepted=true` means MemoraX
+   accepted the request; it does not establish when extracted memory becomes
+   available to Search. Use the [connection and scope checks](#memorax-search-add-or-scope-fails)
+   for credential, network, and repository failures.
+
+If normal status is insufficient, temporarily enable Backend diagnostic logs
+and reproduce one completed turn. In Bash or Zsh:
+
+```sh
+MEMORAX_CODE_BACKEND_DEBUG_REQUESTS=true memorax-code restart
+memorax-code logs
+```
+
+In PowerShell, set `$env:MEMORAX_CODE_BACKEND_DEBUG_REQUESTS = "true"` before
+running `memorax-code restart` and `memorax-code logs`. The default log is
+`$MEMORAX_CODE_HOME/runtime/backend/backend.log`; `MEMORAX_CODE_BACKEND_LOG`
+can override it. Diagnostic event names differ by client before the shared
+writeback stage. Review logs locally because they can contain session IDs,
+paths, and error details. After collecting the needed evidence, set the debug
+variable to `false` and restart the Backend again. Share only a redacted excerpt,
+not raw logs or native history.
+
 ## Quota reminder and Mark ID
 
 Memory write and memory search reminders are tracked independently. A reminder

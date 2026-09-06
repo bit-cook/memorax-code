@@ -53,7 +53,11 @@ WorkBuddy、DeepSeek Harness、OpenCode 或 Trae 中的至少一个。
 
 当前 DeepSeek Harness（DSH）版本要求 Node.js `^22.19.0 || >=24.0.0`。运行 setup 前，
 请先安装或初始化 DSH，创建至少一个 Profile，并确保 `pnpm` 在 `PATH` 中可用。
-更多前置要求、Linux 凭据存储和远程环境说明见[安装要求](INSTALL.md#requirements)。
+MemoraX Code 不会安装或更新 DSH。
+
+Linux 下，setup 管理凭据需要 libsecret 提供的 `/usr/bin/secret-tool`，以及当前用户会话中可用的
+Secret Service。使用 Remote SSH、WSL 或 Dev Container 时，请将 MemoraX Code 安装在
+Coding Agent 所在的同一环境中。MemoraX 搜索和写回需要网络访问。
 
 ### 安装与接入
 
@@ -63,9 +67,12 @@ WorkBuddy、DeepSeek Harness、OpenCode 或 Trae 中的至少一个。
 npm install -g @memorax/memorax-code
 ```
 
+此命令只安装包，不会启动交互式安装引导。请勿使用 `--ignore-scripts`：替换包时，npm 生命周期
+脚本会安全停止并恢复已有的运行中托管 Backend。
+
 #### 2. 注册或接入 MemoraX 账号（推荐）
 
-前往 [MemoraX](https://platform.memorax.net/) 注册账号；已有账号可直接使用，然后运行：
+前往 [MemoraX](https://platform.memorax.net/) 注册账号；已有账号可直接使用，然后在正常的交互式终端中运行：
 
 ```bash
 memorax-code setup --existing-account
@@ -86,6 +93,10 @@ memorax-code setup --existing-account
 memorax-code setup
 ```
 
+默认 setup 会复用已有的完整连接；否则会检测本机用户名和语言，必要时询问，再创建或恢复游客凭据。
+如需替换已保存的连接，游客模式使用 `memorax-code setup --reconfigure`，
+正式账号使用 `memorax-code setup --existing-account`。
+
 如果稍后注册时希望保留游客记忆，请先直接在本机终端运行：
 
 ```bash
@@ -100,13 +111,19 @@ memorax-code account --show-mark-id
 
 两种安装引导都会自动检测受支持的 Coding Agent。完成后，请重启或刷新检测到的 Coding Agent。
 
-- **Codex：** 如果尚未启用，请在 Plugins 或 `/plugins` 中启用 **MemoraX Code Codex Adapter**。
-- **Trae：** 打开 **设置 → Hooks → 全局 → 已配置的 Hooks**，开启已注册的 Global Hooks。
-  setup 会安装 Hooks 和 Skill，但这个开关需要手动开启一次。
+| 客户端 | 完成激活 |
+| --- | --- |
+| Codex | 如果尚未启用，请在 Plugins 或 `/plugins` 中启用 **MemoraX Code Codex Adapter**。 |
+| Claude Code | 重启或刷新客户端，加载受管插件和 Hooks。 |
+| CodeBuddy/WorkBuddy | 重启或刷新 WorkBuddy，加载受管插件、Hooks 和 Skill。 |
+| DeepSeek Harness | 重启或刷新 DSH，加载已注册到现有 Profile 中的插件。 |
+| OpenCode | 重启或刷新客户端，自动发现受管插件和 Skill。 |
+| Trae | 打开 **设置 → Hooks → 全局 → 已配置的 Hooks**，开启已注册的 Global Hooks。setup 会安装 Hooks 和 Skill，但这个开关需要手动开启一次。 |
 
 打开项目，新建客户端会话并发送一次 Prompt，然后在项目目录中运行：
 
 ```bash
+memorax-code --version
 memorax-code status
 memorax-cli status
 ```
@@ -116,8 +133,8 @@ Windows PowerShell 请使用 `memorax-cli.cmd status`。客户端真正执行 Ho
 `observed`。
 
 `memorax-code status` 检查本地 Backend 和客户端集成；`memorax-cli status` 检查本地记忆配置
-和工作区作用域。接着按下方示例体验跨会话记忆，验证实际效果。各客户端的诊断命令见
-[安装验证](INSTALL.md#4-verify-the-installation)。
+和工作区作用域。这两个命令都不会向 MemoraX 发送测试请求；实际搜索或写入才会验证远端连接与凭据。
+接着按下方示例体验跨会话记忆，验证实际效果。各客户端的诊断命令见[故障排查](docs/troubleshooting.md)。
 
 ### 安装故障排查
 
@@ -218,8 +235,10 @@ MemoraX 云端不会接收模型服务商凭据或本地 Backend Token。
 memorax-code update
 ```
 
-完成 setup 后，托管 Backend 运行期间也会自动检查并更新。发布通道、客户端选择和关闭后台检查的
-设置见[更新指南](INSTALL.md#update)。如果更新修改了运行中客户端已加载的集成资产，请重启或刷新客户端。
+完成 setup 后，托管 Backend 运行期间也会自动检查并更新。更新会短暂停止运行中的托管 Backend，
+再按保留的客户端选择恢复；原本已停止的安装会保持停止。发布通道、自定义状态目录、客户端选择和关闭
+后台检查的方法见[更新配置](docs/configuration.md#setup-automatic-update-and-package-transition-state)。
+如果更新修改了运行中客户端已加载的集成资产，请重启或刷新客户端。
 
 ### Windows 升级提示
 
@@ -235,11 +254,15 @@ memorax-code uninstall
 ```
 
 该命令会移除受管客户端集成和全局 npm 包，同时保留配置与已保存的记忆。
-保留的数据和重新安装后的行为见[卸载指南](INSTALL.md#uninstall)。
+请勿先运行 `npm uninstall -g`，否则可能在清理客户端集成之前就移除了产品命令。
+完整的保留数据清单见[卸载与数据保留](SECURITY.md#uninstall-and-retention)。
+
+完整卸载后重新安装时，请再次运行 `memorax-code setup`；默认会复用保留的完整连接。
+正常执行 `memorax-code stop` 或仅卸载部分客户端集成会保留 setup 完成状态。
 
 ## 文档
 
-- [安装指南](INSTALL.md)
+- [安装与首次使用](#快速开始)
 - [配置](docs/configuration.md)
 - [故障排查](docs/troubleshooting.md)
 - [参与贡献](CONTRIBUTING.md)

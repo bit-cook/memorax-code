@@ -29,12 +29,18 @@ memorax-code status
 memorax-cli status
 ```
 
-This reconciles the managed Backend and client integrations. Some Hook and CLI
-processes reread configuration sooner, but `memorax-code start` is the
-supported consistency boundary.
+This reconciles client integrations and starts the managed Backend if needed.
+Memory operations reread `config.toml`, but environment variables belong to the
+process that inherited them: `start` keeps an already-running Backend. After
+changing its environment, run `memorax-code restart` from the shell with the
+intended overrides. Restart or refresh coding clients when their loaded
+integration or inherited environment changes.
 
-TOML booleans are `true` or `false`. Environment booleans accept
-`true/false`, `1/0`, `yes/no`, and `on/off`. Unknown fields are ignored and
+TOML booleans are `true` or `false`. Memory and trace environment booleans
+normally accept `true/false`, `1/0`, `yes/no`, and `on/off`. The global write
+switch `MEMORAX_CODE_MEMORAX_WRITEBACK_ENABLED` is an exception: only the exact
+lowercase string `false` disables writes; `0`, `no`, and `off` do not. Use the
+documented values for other runtime switches. Unknown fields are ignored and
 are not a compatibility contract.
 
 ## New configuration
@@ -143,7 +149,18 @@ while a failed check, install, or reconciliation retries after 15 minutes. Set
 Backend to disable the scheduler. Client startup Hooks only recover an
 unavailable Backend and do not schedule updates.
 
-The updater installs an exact published version and runs an internal
+For a manual update using a custom state root, pass its absolute path:
+
+```sh
+memorax-code update --home /absolute/path/to/memorax-code-home
+```
+
+A manual interactive update may offer newly available clients. Without
+completed setup, or when a manual update is non-interactive, package
+replacement can finish while the command directs you to run
+`memorax-code setup` explicitly.
+
+The automatic updater installs an exact published version and runs an internal
 non-interactive setup mode. That mode preserves explicit `[clients]` choices,
 enables detected clients missing from an older configuration, and preserves
 connection data and memory preferences. For Codex, only new or changed Hooks
@@ -266,8 +283,8 @@ record and content-addressed Hook runtime live under
 `$MEMORAX_CODE_HOME/adapters/trae/`. Setup merges one marked MemoraX Code Hook
 into each of `SessionStart`, `UserPromptSubmit`, and `Stop`, preserves other
 Trae Hooks and settings, and refuses to replace an unmanaged
-`skills/memorax-code` directory. Disable and uninstall remove only entries
-marked as MemoraX Code-owned and the managed Skill.
+`skills/memorax-code` directory. Stop removes only the managed Hook entries and
+retains the Skill; uninstall also removes the managed Skill.
 
 Trae does not expose a reliable programmatic switch for application-level
 Global Hooks. After the first setup, enable **Global Hooks** once in Trae
@@ -321,7 +338,8 @@ non-Git workspaces. It never falls back to the unscoped base identity.
 
 ## Retrieval
 
-Automatic prompt retrieval is disabled by default.
+Automatic prompt retrieval is disabled by default. The fields below belong in
+the `[memory.retrieval]` TOML table.
 
 | Field | Environment override | Fallback |
 | --- | --- | --- |
@@ -343,7 +361,8 @@ credentials and a trusted workspace scope resolve.
 ## Writeback and explicit add
 
 New configurations explicitly set automatic completed-turn writeback to enabled.
-An existing configuration without `enabled` remains disabled.
+An existing configuration without `enabled` remains disabled. The fields below
+belong in the `[memory.writeback]` TOML table.
 
 | Field | Environment override | Fallback |
 | --- | --- | --- |
@@ -357,9 +376,10 @@ An existing configuration without `enabled` remains disabled.
 | `chunk_max_chars` | `MEMORAX_CODE_MEMORY_WRITEBACK_CHUNK_MAX_CHARS` | `8000` |
 | `chunk_overlap_ratio` | `MEMORAX_CODE_MEMORY_WRITEBACK_CHUNK_OVERLAP_RATIO` | `0.05`; range `0 <= x < 1` |
 
-The global kill switch
-`MEMORAX_CODE_MEMORAX_WRITEBACK_ENABLED=false` disables automatic writeback and
-explicit `memory add`.
+Automatic writeback and explicit Add have separate configuration gates.
+`[memory.writeback].enabled` does not disable explicit `memorax-cli add`;
+`[memory.cli].add_enabled` does not disable automatic writeback. The global
+environment switch can disable both, as described below.
 
 | Field | Environment override | Fallback |
 | --- | --- | --- |
@@ -375,6 +395,48 @@ the resolved value to MemoraX. Invalid values fail closed instead of silently
 selecting another language. The setting affects newly generated content;
 `raw` input and client-supplied `pre_summarized` text are not translated.
 Command arguments override the other add defaults.
+
+### Disabling memory writes
+
+To persistently disable both automatic writeback and explicit Add, update the
+existing tables in `config.toml`:
+
+```toml
+[memory.writeback]
+enabled = false
+
+[memory.cli]
+add_enabled = false
+```
+
+Remove conflicting environment overrides that enable either feature, then run
+`memorax-code restart` and `memorax-cli status` from the intended environment.
+Setting only the first table disables automatic writeback while keeping
+explicit Add available. Search is independent of both switches.
+
+For a temporary override, export the global switch before restarting the
+Backend and launching any clients that run memory commands. In Bash or Zsh:
+
+```sh
+export MEMORAX_CODE_MEMORAX_WRITEBACK_ENABLED=false
+memorax-code restart
+memorax-cli status
+```
+
+In PowerShell:
+
+```powershell
+$env:MEMORAX_CODE_MEMORAX_WRITEBACK_ENABLED = "false"
+memorax-code restart
+memorax-cli.cmd status
+```
+
+Only the exact string `false` disables this global switch. A shell assignment
+does not change an already-running Backend or coding client's environment;
+new CLI processes must inherit the override too. The controls apply to new
+write decisions. They do not cancel requests already sent or guarantee that
+previously buffered turns are discarded: graceful Backend shutdown can flush
+those turns. They also do not delete memories already stored in MemoraX.
 
 ### Automatic writeback redaction
 
@@ -412,6 +474,8 @@ controls trusted repo-scoped Procedure Memory. User Profile preferences are
 applied on first observation and restored with a personal-memory reminder
 after successful context compaction. These local contexts remain separate
 from automatic writeback content.
+
+The repository-update fields below belong in `[memory.repo_update]`.
 
 | Field | Environment override | Fallback |
 | --- | --- | --- |

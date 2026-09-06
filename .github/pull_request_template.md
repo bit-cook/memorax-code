@@ -7,7 +7,7 @@
 -
 
 ## Validation
-<!-- Describe how it was verified: unit tests, manual testing, or evaluation scripts; any one is acceptable. -->
+<!-- List the applicable verification profiles from CONTRIBUTING.md#verification-profiles, the commands run, and their results. Complete every profile required by the change; manual testing supplements those checks. Record relevant checks not run and why. -->
 
 ## Full End-to-End Validation Results
 <!--

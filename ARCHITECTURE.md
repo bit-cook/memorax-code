@@ -9,11 +9,11 @@ the current system, not a roadmap or a complete file inventory.
 - Live source, manifests, and executable tests are the authority for current
   behavior. This document explains their architectural intent.
 - [AGENTS.md](AGENTS.md) defines working rules for coding agents, runtime and
-  data invariants, verification commands, and Git handoff requirements.
-- [CONTRIBUTING.md](CONTRIBUTING.md) defines the contributor workflow and
-  [documentation ownership](CONTRIBUTING.md#documentation-ownership).
+  data invariants, and Git handoff requirements.
+- [CONTRIBUTING.md](CONTRIBUTING.md) defines development, debugging,
+  verification procedures, and [documentation ownership](CONTRIBUTING.md#documentation-ownership).
 - [SECURITY.md](SECURITY.md) defines security and trust-boundary policy.
-- [Installation](INSTALL.md) owns setup and lifecycle procedures;
+- [README](README.md) owns ordinary installation and first use;
   [Configuration](docs/configuration.md) owns settings and their semantics;
   [Troubleshooting](docs/troubleshooting.md) owns diagnosis and recovery.
 
@@ -338,8 +338,9 @@ marker-owned command into each required event in Trae's `hooks.json`, and
 installs the canonical Skill under the Trae data home. Existing user Hooks are
 preserved, and an unmanaged Skill at the target path fails closed. Trae owns
 the application-level Global Hooks switch; setup reports the required one-time
-manual activation until the runtime records a real Hook observation. Stop and
-uninstall remove only marker-owned Hook entries and the managed Skill.
+manual activation until the runtime records a real Hook observation. Stop
+removes marker-owned Hook entries and preserves the managed Skill; uninstall
+also removes the managed Skill. Neither operation removes user-owned Hooks.
 
 Foreground setup in the npm layer derives the versioned trial device identity,
 calls the MemoraX trial-provision endpoint, and commits the returned API key and
@@ -352,6 +353,12 @@ claiming, but it does not replace the configured repository-scoped memory
 identity.
 
 ### 3.2 Hook and retrieval data flow
+
+Automatic Search on turn-start Hooks is disabled by default. The usual Search
+path is a client deciding through the shared Skill to call `memorax-cli`, as
+shown in [Manual memory CLI flow](#33-manual-memory-cli-flow). Hooks still
+provide native identity, scope, local context, and automatic-writeback
+coordination when automatic retrieval is off.
 
 ```mermaid
 sequenceDiagram
@@ -370,9 +377,11 @@ sequenceDiagram
   HTTP->>Service: normalized memory command
   Service->>Native: resolve client-native authority
   Native->>Scope: resolve, revalidate, or narrowly upgrade scope
-  Native->>Provider: perform automatic retrieval when applicable
-  Provider-->>Native: normalized provider result
-  Provider->>Obs: emit operational event
+  opt automatic retrieval explicitly enabled and eligible
+    Native->>Provider: retrieve scoped memory
+    Provider-->>Native: normalized provider result
+    Provider->>Obs: emit operational event
+  end
   Native-->>Hook: accepted result and local scope context
   Hook-->>Client: client-native response or injected context
 ```
@@ -441,6 +450,22 @@ Important distinctions:
   or reconstruct content from unrelated local files.
 
 ### 3.3 Manual memory CLI flow
+
+The shared `memorax-code` Skill routes coding tasks to the relevant memory
+instructions. When the task calls for persistent recall, the client runs
+`memorax-cli search` through its shell tool and uses the returned scoped memory.
+Users can also invoke the same CLI directly. This explicit Search path is
+independent of the automatic-retrieval setting.
+
+```mermaid
+flowchart LR
+  Task["coding task"] --> Skill["shared Skill<br/>decide whether to search"]
+  Skill --> CLI["memorax-cli search"]
+  CLI --> Scope["resolve repository scope"]
+  Scope --> Provider["MemoraX Search"]
+  Provider --> Result["scoped result to client"]
+  CLI -.-> Trace["local trace"]
+```
 
 `memorax-cli` enters through Backend `src/memorax-cli.ts` and
 `src/memory/cli.ts`. It does not traverse Hook HTTP or the `MemoryService`
@@ -933,7 +958,7 @@ flowchart TD
   and local-only data-boundary violations.
 - Installed-package tests isolate MemoraX Code state and every affected client
   home so lifecycle and integration checks do not reuse developer state; use
-  the [verification isolation rules](AGENTS.md#5-verification).
+  the [development isolation rules](CONTRIBUTING.md#isolated-development-environment).
 
 Root architecture and contributor guidance are repository documents, while
 [shipped-docs.json](packages/npm/memorax-code/shipped-docs.json) remains the
@@ -941,10 +966,13 @@ authority for the `docs/` pages included in the npm package.
 
 ## 8. Test Architecture and Change Routing
 
-Backend tests mirror capability ownership. They do not mirror every source
-file and are not divided first into unit and integration layers.
+Backend tests generally mirror capability ownership. They do not mirror every
+source file and are not divided first into unit and integration layers. Repo
+Memory is an existing cross-package exception: its core collection and
+validation tests live in the Codex adapter suite and exercise the compiled
+Backend helper through the canonical Skill launcher.
 
-| Source responsibility | Primary Backend test area |
+| Backend source responsibility | Primary test area |
 | --- | --- |
 | `src/app` | `test/app` |
 | `src/clients/<client>` | `test/clients/<client>` |
@@ -952,6 +980,7 @@ file and are not divided first into unit and integration layers.
 | `src/entrypoints` and root executable behavior | `test/entrypoints`; management-CLI lifecycle behavior in `test/lifecycle`; root allowlist in `test/architecture` |
 | `src/lifecycle` and `src/lifecycle/backend` | `test/lifecycle` and `test/lifecycle/backend` |
 | `src/memory` | `test/memory` |
+| `src/repo-memory` | Codex adapter `test/repo-memory-builder*.test.mjs` for collection and validation; other `test/repo-memory-*.test.mjs` files cover readers and orchestration |
 | `src/personal-memory` | `test/personal-memory`; canonical Skill launcher integration in Codex adapter tests |
 | `src/provider/memorax` | `test/provider/memorax` |
 | `src/repository` | `test/repository` |
@@ -966,7 +995,8 @@ Placement rules:
 - Area-specific fixtures belong in `test/<area>/support`; only helpers truly
   shared across responsibilities belong in `test/support`.
 - `test/architecture` has no source counterpart. It owns source topology,
-  root-surface, public-route, delegation, and dependency-cycle contracts.
+  root-surface, delegation, and dependency-cycle contracts. HTTP route behavior
+  belongs in `test/transport/http` and `test/app`.
 - Backend behavior tests build and exercise `dist`; architecture tests inspect
   `src` directly.
 - The Backend suite discovers nested tests recursively. Adapter suites
@@ -979,8 +1009,9 @@ Placement rules:
   for explicit paths and test-name patterns.
 
 Contributor-facing verification profiles are centralized in
-[AGENTS.md Section 5](AGENTS.md#5-verification). Architecture change routing
-uses those named profiles rather than copying commands here.
+[CONTRIBUTING.md](CONTRIBUTING.md#verification-profiles), including the Backend
+build prerequisite for standalone Codex and CodeBuddy/WorkBuddy tests. Change
+routing uses those named profiles rather than copying commands here.
 The [harness onboarding checklist](CONTRIBUTING.md#adding-a-harness)
 connects native authority, lifecycle reporting, packaging, and existing test
 contracts without introducing a separate adapter test framework.
@@ -988,6 +1019,7 @@ contracts without introducing a separate adapter test framework.
 | Change surface | Primary evidence | Contracts to inspect | Verification profile |
 | --- | --- | --- | --- |
 | One Backend capability | Matching `test/<area>` | Source boundaries when imports change | Backend |
+| Repo Memory collection or validation | Codex adapter collector/validator tests against the compiled Backend helper | Source boundaries and canonical Skill launcher | Repo Memory |
 | Runtime composition | `test/app` | Backend source boundaries | Backend |
 | Hook HTTP or adapter-visible command schema | `test/transport/http` and affected adapter suites | Backend source boundaries and package shape when staged | Backend + Adapter-common/shared Hook; add Install/artifacts when staged package shape changes |
 | Backend root entrypoint or compatibility facade | Entrypoint, architecture, and npm package tests | Source boundaries and package shape | Backend + Install/artifacts |

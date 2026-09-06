@@ -57,9 +57,13 @@ Claude Code, WorkBuddy, DeepSeek Harness, OpenCode, or Trae.
 
 For DeepSeek Harness (DSH), current releases require Node.js
 `^22.19.0 || >=24.0.0`. Install or initialize DSH first, create at least one
-Profile, and ensure `pnpm` is on `PATH` before running setup. See
-[installation requirements](INSTALL.md#requirements) for more detail,
-Linux credential storage, and remote environments.
+Profile, and ensure `pnpm` is on `PATH` before running setup. MemoraX Code
+does not install or update DSH.
+
+On Linux, setup-managed credentials require `/usr/bin/secret-tool` from
+libsecret and an available Secret Service in the current user session. For
+Remote SSH, WSL, or Dev Containers, install MemoraX Code in the same environment
+as the coding agent. MemoraX search and writeback require network access.
 
 ### Install and Connect
 
@@ -69,10 +73,14 @@ Linux credential storage, and remote environments.
 npm install -g @memorax/memorax-code
 ```
 
+This installs the package; it does not start interactive setup. Do not use
+`--ignore-scripts`: npm lifecycle scripts safely stop and restore an existing
+running managed Backend during package replacement.
+
 #### 2. Connect a MemoraX Account (Recommended)
 
 [Create a MemoraX account](https://platform.memorax.net/) or use an existing
-one, then run:
+one, then run from a normal interactive terminal:
 
 ```bash
 memorax-code setup --existing-account
@@ -95,6 +103,12 @@ To start immediately and connect an account later, run:
 memorax-code setup
 ```
 
+Default setup reuses a complete existing connection. Otherwise, it detects
+your local username and language, asks when needed, and creates or restores
+guest credentials. To replace the saved connection, use
+`memorax-code setup --reconfigure` for guest mode or
+`memorax-code setup --existing-account` for a registered account.
+
 To keep your guest memory when registering later, first run this command
 directly in your local terminal:
 
@@ -113,16 +127,20 @@ memorax-code account --show-mark-id
 Both setup paths automatically detect supported coding agents. Restart or
 refresh every detected coding agent after setup.
 
-- **Codex:** enable **MemoraX Code Codex Adapter** from Plugins or `/plugins`
-  if it is not already enabled.
-- **Trae:** open **Settings → Hooks → Global → Configured Hooks** and enable
-  the registered Global Hooks once. Setup installs the Hooks and Skill;
-  this switch requires manual activation.
+| Client | Complete activation |
+| --- | --- |
+| Codex | Enable **MemoraX Code Codex Adapter** from Plugins or `/plugins` if it is not already enabled. |
+| Claude Code | Restart or refresh the client to load the managed plugin and Hooks. |
+| CodeBuddy/WorkBuddy | Restart or refresh WorkBuddy to load the managed plugin, Hooks, and Skill. |
+| DeepSeek Harness | Restart or refresh DSH to load the plugin registered in existing Profiles. |
+| OpenCode | Restart or refresh the client to discover the managed plugin and Skill. |
+| Trae | In **Settings → Hooks → Global → Configured Hooks**, enable the registered Global Hooks once. Setup installs the Hooks and Skill; this switch requires manual activation. |
 
 Open a project, start a new client session, and send one prompt. Then run
 these commands from the project directory:
 
 ```bash
+memorax-code --version
 memorax-code status
 memorax-cli status
 ```
@@ -134,9 +152,10 @@ to `observed`.
 
 `memorax-code status` checks the local Backend and client integrations;
 `memorax-cli status` checks the local memory configuration and workspace scope.
-To verify memory works across sessions, follow the example below. For
-client-specific diagnostic commands, see
-[installation verification](INSTALL.md#4-verify-the-installation).
+Neither command sends a test request to MemoraX. A real search or write verifies
+remote connectivity and credentials; follow the cross-session example below.
+For client-specific diagnostic commands, see
+[Troubleshooting](docs/troubleshooting.md).
 
 ### Installation Troubleshooting
 
@@ -261,9 +280,12 @@ memorax-code update
 ```
 
 Setup also enables background updates while the managed Backend is running.
-See the [update guide](INSTALL.md#update) for release channels, client selection,
-and the setting to disable background checks. Restart or refresh a client after
-an update changes integration assets it has already loaded.
+An update briefly stops a running managed Backend and restores it with the
+retained client selection; an already-stopped installation remains stopped.
+See [update settings](docs/configuration.md#setup-automatic-update-and-package-transition-state)
+for release channels, custom state roots, client selection, and disabling
+background checks. Restart or refresh a client after an update changes
+integration assets it has already loaded.
 
 ### Windows Upgrade Note
 
@@ -279,12 +301,18 @@ memorax-code uninstall
 ```
 
 This removes managed integrations and the global package while retaining
-configuration and stored memories. See the [uninstall guide](INSTALL.md#uninstall)
-for the retained data and reinstall behavior.
+configuration and stored memories. Do not run `npm uninstall -g` first: it can
+remove the product command before client integration cleanup runs. See
+[Uninstall and Retention](SECURITY.md#uninstall-and-retention) for the complete
+retained-data list.
+
+After a complete uninstall and reinstall, run `memorax-code setup` again;
+default setup reuses a complete retained connection. A normal
+`memorax-code stop` or partial client uninstall preserves setup completion.
 
 ## Documentation
 
-- [Installation](INSTALL.md)
+- [Installation and first use](#quick-start)
 - [Configuration](docs/configuration.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
