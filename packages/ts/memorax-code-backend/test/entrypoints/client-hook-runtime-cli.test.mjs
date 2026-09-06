@@ -14,14 +14,14 @@ import { freePort } from "../support/helpers.mjs";
 
 const cliPath = fileURLToPath(new URL("../../dist/memorax-code.js", import.meta.url));
 
-test("start activates its pending Hook generation for an inline MemoraX Code home", async () => {
+test("start and restart activate successive pending Hook generations with inline and separate home arguments", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-cli-start-"));
   const home = join(root, "home");
   const packageRoot = join(root, "package");
   const port = await freePort();
   try {
-    await writeRuntimePackage(packageRoot, "1.0.0", "generation-b");
-    const generation = stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome: home });
+    await writeRuntimePackage(packageRoot, "1.0.0", "generation-a");
+    const generationA = stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome: home });
 
     const started = await runCli([
       "start",
@@ -31,37 +31,11 @@ test("start activates its pending Hook generation for an inline MemoraX Code hom
       "--clients",
       "none",
     ], {
-      MEMORAX_CODE_PENDING_CLIENT_HOOK_RUNTIME_V1: pendingRuntime(home, generation),
+      MEMORAX_CODE_PENDING_CLIENT_HOOK_RUNTIME_V1: pendingRuntime(home, generationA),
     });
 
     assert.equal(started.code, 0, `${started.stdout}\n${started.stderr}`);
-    assert.equal(await currentGenerationId(home), generation.generationId);
-  } finally {
-    await runCli(["stop", "--json", "--home", home, "--port", String(port), "--clients", "none"]);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("restart activates its pending Hook generation", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-cli-restart-"));
-  const home = join(root, "home");
-  const packageRoot = join(root, "package");
-  const port = await freePort();
-  try {
-    await writeRuntimePackage(packageRoot, "1.0.0", "generation-a");
-    const generationA = stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome: home });
-    activateClientHookRuntimeGeneration({ memoraxCodeHome: home, generation: generationA });
-    const started = await runCli([
-      "start",
-      "--json",
-      "--home",
-      home,
-      "--port",
-      String(port),
-      "--clients",
-      "none",
-    ]);
-    assert.equal(started.code, 0, `${started.stdout}\n${started.stderr}`);
+    assert.equal(await currentGenerationId(home), generationA.generationId);
 
     await writeRuntimePackage(packageRoot, "1.0.1", "generation-b");
     const generationB = stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome: home });

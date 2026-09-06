@@ -131,7 +131,7 @@ test("stop preserves setup completion while complete uninstall clears it and pre
   }
 });
 
-test("memorax-code start and stop preserve custom Codex provider config on the Hook lifecycle", async () => {
+test("Codex lifecycle seeds defaults, reports readiness, and preserves custom provider config", async () => {
   const home = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-home-"));
   const codexHome = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-codex-"));
   const port = await freePort();
@@ -166,6 +166,21 @@ test("memorax-code start and stop preserve custom Codex provider config on the H
     assert.equal(startReport.codexAdapter.enabled, true);
     assert.equal(startReport.codexAdapter.integration, "hooks");
     assert.equal(await readFile(join(codexHome, "config.toml"), "utf8"), originalConfig);
+    assert.equal(await readFile(join(home, "config.toml"), "utf8"), renderDefaultMemoraxCodeConfig());
+
+    const readyStatus = await runCli(cliPath, [
+      "status",
+      "--home", home,
+      "--port", String(port),
+      "--codex-home", codexHome,
+      "--clients", "codex",
+    ]);
+    assert.equal(readyStatus.code, 0, `${readyStatus.stdout}\n${readyStatus.stderr}`);
+    assert.match(readyStatus.stdout, /^\[MemoraX Code Backend\]: MemoraX Code Backend status: .*Enabled/m);
+    assert.match(readyStatus.stdout, /^\[MemoraX Code Backend\]: Codex adapter: ok integration=hooks skills=plugin-managed/m);
+    assert.doesNotMatch(readyStatus.stdout, /^\[MemoraX Code Backend\]: Claude adapter:/m);
+    assert.doesNotMatch(readyStatus.stdout, /Claude adapter is not enabled/);
+    assert.doesNotMatch(readyStatus.stdout, /Run `memorax-code start`, then restart or refresh Claude Code/);
 
     const updated = await runCli(cliPath, [
       "start", "--json",
@@ -642,7 +657,7 @@ test("memorax-code uninstall leaves direct Claude provider settings unchanged", 
   }
 });
 
-test("memorax-code start leaves Codex config unchanged before the plugin is installed", async () => {
+test("Codex lifecycle skips a missing plugin, then registers it with --yes for activation", async () => {
   const home = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-no-plugin-home-"));
   const codexHome = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-no-plugin-codex-"));
   const port = await freePort();
@@ -672,8 +687,27 @@ test("memorax-code start leaves Codex config unchanged before the plugin is inst
     assert.equal(report.codexAdapter.skipped, true);
     assert.equal(report.codexAdapter.reason, "codex_plugin_not_installed");
     assert.equal(await readFile(join(codexHome, "config.toml"), "utf8"), originalConfig);
+
+    const registered = await runCli(cliPath, [
+      "start",
+      "--yes",
+      "--home", home,
+      "--port", String(port),
+      "--codex-home", codexHome,
+      "--marketplace-path", join(home, ".agents", "plugins", "marketplace.json"),
+      "--clients", "codex",
+    ]);
+    assert.equal(registered.code, 0, `${registered.stdout}\n${registered.stderr}`);
+    assert.match(registered.stdout, /Codex plugin source registered/);
+    assert.match(registered.stdout, /Activate the MemoraX Code Codex Adapter plugin/);
+    assert.match(registered.stdout, /^\[MemoraX Code Backend\]: Codex adapter: skipped codex_plugin_activation_required/m);
+    assert.match(registered.stdout, /one or more adapters are not enabled/);
+    const pluginManifest = JSON.parse(await readFile(join(codexHome, ".memorax-code", "plugins", "memorax-code-codex-adapter", ".codex-plugin", "plugin.json"), "utf8"));
+    assert.equal(pluginManifest.name, "memorax-code-codex-adapter");
+    const marketplace = JSON.parse(await readFile(join(home, ".agents", "plugins", "marketplace.json"), "utf8"));
+    assert.equal(marketplace.plugins[0].name, "memorax-code-codex-adapter");
   } finally {
-    await runCli(cliPath, ["stop", "--json", "--home", home, "--port", String(port), "--codex-home", codexHome, "--clients", "none"]);
+    await runCli(cliPath, ["stop", "--json", "--home", home, "--port", String(port), "--codex-home", codexHome, "--clients", "codex"]);
     await rm(home, { recursive: true, force: true });
     await rm(codexHome, { recursive: true, force: true });
   }
@@ -711,77 +745,6 @@ test("package replacement restores only previously active clients", async () => 
     ]);
     await rm(home, { recursive: true, force: true });
     await rm(codexHome, { recursive: true, force: true });
-  }
-});
-
-test("memorax-code start --yes registers a missing Codex plugin but requires activation", async () => {
-  const home = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-prompt-plugin-home-"));
-  const codexHome = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-prompt-plugin-codex-"));
-  const port = await freePort();
-  const cliPath = fileURLToPath(new URL("../../dist/memorax-code.js", import.meta.url));
-  await writeFile(join(codexHome, "config.toml"), [
-    'model_provider = "custom"',
-    "",
-    "[model_providers.custom]",
-    'base_url = "http://127.0.0.1:9999/v1"',
-    'wire_api = "responses"',
-    "",
-  ].join("\n"));
-  try {
-    const started = await runCli(cliPath, [
-      "start",
-      "--yes",
-      "--home", home,
-      "--port", String(port),
-      "--codex-home", codexHome,
-      "--marketplace-path", join(home, ".agents", "plugins", "marketplace.json"),
-      "--clients", "codex",
-    ]);
-    assert.equal(started.code, 0, `${started.stdout}\n${started.stderr}`);
-    assert.match(started.stdout, /Codex plugin source registered/);
-    assert.match(started.stdout, /Activate the MemoraX Code Codex Adapter plugin/);
-    assert.match(started.stdout, /^\[MemoraX Code Backend\]: Codex adapter: skipped codex_plugin_activation_required/m);
-    assert.match(started.stdout, /one or more adapters are not enabled/);
-    const pluginManifest = JSON.parse(await readFile(join(codexHome, ".memorax-code", "plugins", "memorax-code-codex-adapter", ".codex-plugin", "plugin.json"), "utf8"));
-    assert.equal(pluginManifest.name, "memorax-code-codex-adapter");
-    const marketplace = JSON.parse(await readFile(join(home, ".agents", "plugins", "marketplace.json"), "utf8"));
-    assert.equal(marketplace.plugins[0].name, "memorax-code-codex-adapter");
-  } finally {
-    await runCli(cliPath, ["stop", "--json", "--home", home, "--port", String(port), "--codex-home", codexHome, "--clients", "codex"]);
-    await rm(home, { recursive: true, force: true });
-    await rm(codexHome, { recursive: true, force: true });
-  }
-});
-
-test("memorax-code start seeds the default memory config", async () => {
-  const home = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-default-memory-home-"));
-  const codexHome = await mkdtemp(join(tmpdir(), "memorax-code-lifecycle-default-memory-codex-"));
-  const port = await freePort();
-  const cliPath = fileURLToPath(new URL("../../dist/memorax-code.js", import.meta.url));
-  await writeFile(join(codexHome, "config.toml"), [
-    'model_provider = "custom"',
-    "",
-    "[model_providers.custom]",
-    'name = "Custom"',
-    'base_url = "http://127.0.0.1:9999/openai"',
-    'wire_api = "responses"',
-    "",
-  ].join("\n"));
-  await prepareActiveCodexPlugin(codexHome);
-  try {
-    const started = await runCli(cliPath, [
-      "start", "--json",
-      "--home", home,
-      "--port", String(port),
-      "--codex-home", codexHome,
-      "--clients", "codex",
-    ]);
-    assert.equal(started.code, 0, `${started.stdout}\n${started.stderr}`);
-    const startReport = JSON.parse(started.stdout);
-    assert.equal(startReport.ok, true);
-    assert.equal(await readFile(join(home, "config.toml"), "utf8"), renderDefaultMemoraxCodeConfig());
-  } finally {
-    await runCli(cliPath, ["stop", "--json", "--home", home, "--port", String(port), "--codex-home", codexHome, "--clients", "codex"]);
   }
 });
 

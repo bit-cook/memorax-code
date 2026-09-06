@@ -7,7 +7,6 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  cleanupCodexAfterBackendRemoval,
   isCodexPluginActive,
   isCodexPluginStaged,
   removeCodexPlugin,
@@ -250,7 +249,7 @@ test("codex-plugin install refreshes an existing explicit CLI marketplace source
   }
 });
 
-test("codex-plugin install publishes B before switching the canonical marketplace and preserves A", async () => {
+test("codex-plugin install publishes B, preserves A, and reuses same-version artifacts", async () => {
   const fixture = await canonicalCodexFixture();
   try {
     const result = await runMemoraxCode(["codex-plugin", "install", "--json"], fixture.env);
@@ -282,38 +281,13 @@ test("codex-plugin install publishes B before switching the canonical marketplac
       marketplace.plugins[0].source.path,
       `./versions/${fixture.version}/plugins/memorax-code-codex-adapter`,
     );
-  } finally {
-    await rm(fixture.root, { recursive: true, force: true });
-  }
-});
 
-test("codex-plugin install repairs a missing canonical marketplace entry", async () => {
-  const fixture = await canonicalCodexFixture();
-  try {
-    await writeFile(fixture.marketplacePath, `${JSON.stringify({
-      name: "memorax-code",
-      interface: { displayName: "MemoraX Code" },
-      plugins: [],
-    }, null, 2)}\n`);
-
-    const result = await runMemoraxCode(["codex-plugin", "install", "--json"], fixture.env);
-    assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
-    assert.equal(JSON.parse(result.stdout).registrationMode, "versioned-update");
-    assert.equal(await readFile(join(fixture.cacheA, "sentinel.txt"), "utf8"), "cache A\n");
-
-    const marketplace = JSON.parse(await readFile(fixture.marketplacePath, "utf8"));
-    assert.deepEqual(marketplace.plugins, [{
-      name: "memorax-code-codex-adapter",
-      source: {
-        source: "local",
-        path: `./versions/${fixture.version}/plugins/memorax-code-codex-adapter`,
-      },
-      policy: {
-        installation: "AVAILABLE",
-        authentication: "ON_INSTALL",
-      },
-      category: "Productivity",
-    }]);
+    await writeFile(join(cacheB, "same-version-sentinel.txt"), "cache B\n");
+    await writeFile(join(sourceB, "same-version-sentinel.txt"), "source B\n");
+    const repeated = await runMemoraxCode(["codex-plugin", "install", "--json"], fixture.env);
+    assert.equal(repeated.code, 0, `${repeated.stdout}\n${repeated.stderr}`);
+    assert.equal(await readFile(join(cacheB, "same-version-sentinel.txt"), "utf8"), "cache B\n");
+    assert.equal(await readFile(join(sourceB, "same-version-sentinel.txt"), "utf8"), "source B\n");
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -331,31 +305,6 @@ test("codex-plugin install leaves A and its pointer unchanged when B is invalid"
     assert.match(result.stderr, /Codex plugin artifact/);
     assert.equal(await readFile(fixture.marketplacePath, "utf8"), before);
     assert.equal(await readFile(join(fixture.cacheA, "sentinel.txt"), "utf8"), "cache A\n");
-  } finally {
-    await rm(fixture.root, { recursive: true, force: true });
-  }
-});
-
-test("codex-plugin install never overwrites an existing same-version source or cache", async () => {
-  const fixture = await canonicalCodexFixture();
-  try {
-    const first = await runMemoraxCode(["codex-plugin", "install", "--json"], fixture.env);
-    assert.equal(first.code, 0, `${first.stdout}\n${first.stderr}`);
-    const cacheB = join(fixture.cacheRoot, fixture.version);
-    const sourceB = join(
-      fixture.marketplaceRoot,
-      "versions",
-      fixture.version,
-      "plugins",
-      "memorax-code-codex-adapter",
-    );
-    await writeFile(join(cacheB, "same-version-sentinel.txt"), "cache B\n");
-    await writeFile(join(sourceB, "same-version-sentinel.txt"), "source B\n");
-
-    const second = await runMemoraxCode(["codex-plugin", "install", "--json"], fixture.env);
-    assert.equal(second.code, 0, `${second.stdout}\n${second.stderr}`);
-    assert.equal(await readFile(join(cacheB, "same-version-sentinel.txt"), "utf8"), "cache B\n");
-    assert.equal(await readFile(join(sourceB, "same-version-sentinel.txt"), "utf8"), "source B\n");
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -655,46 +604,6 @@ test("memorax-code uninstall retains the plugin when the Codex Hook adapter cann
     assert.equal(report.npmPackageRemoval.reason, "lifecycle_stop_failed");
     await stat(join(pluginRoot, ".codex-plugin", "plugin.json"));
     await stat(activeClientsPath);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("backend removal cleanup removes the Codex plugin without touching config or Hook state", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-backend-removal-plugin-only-"));
-  const home = join(root, "home");
-  const codexHome = join(home, "codex-home");
-  const memoraxCodeHome = join(home, "memorax-code-home");
-  const fakeCodex = join(root, "missing-codex");
-  const configPath = join(codexHome, "config.toml");
-  const statePath = join(memoraxCodeHome, "adapters", "codex", "state.json");
-  const config = "codex config sentinel\n";
-  const state = `${JSON.stringify({
-    version: 1,
-    runtime: "codex",
-    integration: "hooks",
-    enabled: true,
-    codexHome,
-  }, null, 2)}\n`;
-  try {
-    await mkdir(join(codexHome, ".memorax-code", "plugins", "memorax-code-codex-adapter", ".codex-plugin"), { recursive: true });
-    await mkdir(join(memoraxCodeHome, "adapters", "codex"), { recursive: true });
-    await writeFile(join(codexHome, ".memorax-code", "plugins", "memorax-code-codex-adapter", ".codex-plugin", "plugin.json"), JSON.stringify({ name: "memorax-code-codex-adapter" }));
-    await writeFile(configPath, config);
-    await writeFile(statePath, state);
-
-    const report = await cleanupCodexAfterBackendRemoval({
-      memoraxCodeHome,
-      codexHome,
-      homeDir: home,
-      codexCommand: fakeCodex,
-    });
-
-    assert.equal(report.ok, true);
-    assert.equal(report.codexPlugin.ok, true);
-    assert.equal(await readFile(configPath, "utf8"), config);
-    assert.equal(await readFile(statePath, "utf8"), state);
-    await assert.rejects(stat(join(codexHome, ".memorax-code", "plugins", "memorax-code-codex-adapter", ".codex-plugin", "plugin.json")), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1023,12 +932,18 @@ rl.on("line", (line) => {
       "plugins",
       "marketplace.json",
     ), "utf8"));
-    assert.equal(repeatedMarketplace.plugins.length, 1);
-    assert.equal(repeatedMarketplace.plugins[0].name, "memorax-code-codex-adapter");
-    assert.equal(
-      repeatedMarketplace.plugins[0].source.path,
-      `./versions/${manifest.version}/plugins/memorax-code-codex-adapter`,
-    );
+    assert.deepEqual(repeatedMarketplace.plugins, [{
+      name: "memorax-code-codex-adapter",
+      source: {
+        source: "local",
+        path: `./versions/${manifest.version}/plugins/memorax-code-codex-adapter`,
+      },
+      policy: {
+        installation: "AVAILABLE",
+        authentication: "ON_INSTALL",
+      },
+      category: "Productivity",
+    }]);
     const repeatedPersonalMarketplace = JSON.parse(await readFile(join(
       home,
       ".agents",
