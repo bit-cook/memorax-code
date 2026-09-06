@@ -49,9 +49,11 @@ MemoraX Code 让 Codex、Claude Code、WorkBuddy、DeepSeek Harness、OpenCode �
 ## 快速开始
 
 开始前，请确保已安装 Node.js 20 或更高版本（推荐 Node.js 24 LTS），以及 Codex、Claude Code、
-WorkBuddy、DeepSeek Harness、OpenCode 或 Trae 中的至少一个。各 Coding Agent Harness 仍需满足
-自身的运行时要求；当前 DeepSeek Harness 版本要求 Node.js `^22.19.0 || >=24.0.0`。DSH 可全局安装，
-也可事先通过其官方 `npx` 流程完成初始化。
+WorkBuddy、DeepSeek Harness、OpenCode 或 Trae 中的至少一个。
+
+当前 DeepSeek Harness（DSH）版本要求 Node.js `^22.19.0 || >=24.0.0`。运行 setup 前，
+请先安装或初始化 DSH，创建至少一个 Profile，并确保 `pnpm` 在 `PATH` 中可用。
+更多前置要求、Linux 凭据存储和远程环境说明见[安装要求](INSTALL.md#requirements)。
 
 ### 安装与接入
 
@@ -69,11 +71,12 @@ npm install -g @memorax/memorax-code
 memorax-code setup --existing-account
 ```
 
+按照安装引导，在本机终端中输入 MemoraX 用户名和 API Key。
+
 > [!TIP]
-> 跨设备使用时，可在一台已配置设备的 MemoraX Code 配置文件（默认位于
-> `~/.memorax-code/config.toml`）中找到安装引导所需的 MemoraX 用户名和 API Key，
-> 再在其他设备的安装引导中本地输入。该文件包含您的 API Key，请妥善保管，
-> 不要粘贴到聊天记录或公开 Issue 中。
+> 跨设备使用时，可在一台已配置设备的配置文件（默认位于 `~/.memorax-code/config.toml`）中
+> 找到 MemoraX 用户名和 API Key，再在新设备的安装引导终端中本地输入。
+> 该文件包含您的 API Key，请妥善保管，不要粘贴到聊天记录或公开 Issue 中。
 
 #### 或免账号体验（90 天游客模式）
 
@@ -83,84 +86,49 @@ memorax-code setup --existing-account
 memorax-code setup
 ```
 
-如果您希望将游客账号激活为正式账号，请先直接在本机终端运行：
+如果稍后注册时希望保留游客记忆，请先直接在本机终端运行：
 
 ```bash
 memorax-code account --show-mark-id
 ```
 
-获取 Mark ID 后，再前往 MemoraX 注册。当前暂不支持为已经注册的账号补绑 Mark ID。
+> [!IMPORTANT]
+> 请先获取 Mark ID，再前往 [MemoraX](https://platform.memorax.net/) 注册并使用它激活游客账号。
+> 当前暂不支持为已经注册的账号补绑 Mark ID。
+
+#### 3. 激活并验证
 
 两种安装引导都会自动检测受支持的 Coding Agent。完成后，请重启或刷新检测到的 Coding Agent。
 
-> [!IMPORTANT]
-> **仅 Trae 用户需要：** setup 会安装受管 Skill 和 Global Hooks，但 Trae 要求用户手动开启
-> Global Hooks 开关。请在 Trae 中打开 **设置 → Hooks → 全局 → 已配置的 Hooks**，开启已注册的
-> Hooks，然后新建 Trae 会话并发送一次 Prompt。运行 `memorax-code status`，确认 Trae Hook
-> runtime 从 `unverified` 变为 `observed`。如果由 Agent 代为安装，Agent 应明确提醒用户完成这项
-> Trae 专属的界面操作；其他受支持的 Coding Agent 不需要执行这一步。
+- **Codex：** 如果尚未启用，请在 Plugins 或 `/plugins` 中启用 **MemoraX Code Codex Adapter**。
+- **Trae：** 打开 **设置 → Hooks → 全局 → 已配置的 Hooks**，开启已注册的 Global Hooks。
+  setup 会安装 Hooks 和 Skill，但这个开关需要手动开启一次。
+
+打开项目，新建客户端会话并发送一次 Prompt，然后在项目目录中运行：
+
+```bash
+memorax-code status
+memorax-cli status
+```
+
+Windows PowerShell 请使用 `memorax-cli.cmd status`。客户端真正执行 Hook 之前，已配置好的集成
+仍可能显示 `hook-runtime=unverified`；成功执行 Hook 后，对应客户端的 Hook runtime 应变为
+`observed`。
+
+`memorax-code status` 检查本地 Backend 和客户端集成；`memorax-cli status` 检查本地记忆配置
+和工作区作用域。接着按下方示例体验跨会话记忆，验证实际效果。各客户端的诊断命令见
+[安装验证](INSTALL.md#4-verify-the-installation)。
 
 ### 安装故障排查
 
-如果首次安装或配置没有正常完成，可以先检查以下常见情况：
-
-| 现象 | 建议处理方式 |
-| --- | --- |
-| 因 Node.js 版本不受支持导致安装失败 | 运行 `node --version` 检查版本，并升级到 Node.js 20 或更高版本后重新安装 MemoraX Code。 |
-| npm 包已安装，但没有进入安装引导 | 这是正常行为。请在正常的交互式终端中选择并运行上方适合您的安装引导命令。 |
-| Windows 提示无法识别 `memorax-code` 或 `memorax-cli` | 按照下方 Windows PATH 步骤处理。这两个命令由同一个包安装，不要单独安装 `memorax-cli` 包。 |
-| 完成安装引导后，搜索、召回或写回仍不可用 | 运行 `memorax-code status` 和对应平台的记忆命令（Windows PowerShell 使用 `memorax-cli.cmd status`，macOS 和 Linux 使用 `memorax-cli status`），然后按照详细的故障排查指南处理。 |
+npm 包安装完成后不会自动启动 setup，请在交互式终端中运行上面适合您的安装引导命令。
+如果 setup 未完成或记忆不可用，请先运行状态检查命令，再按[故障排查](docs/troubleshooting.md)处理。
 
 #### Windows：找不到 `memorax-code` 或 `memorax-cli`
 
-Windows 上，全局 npm 安装会将命令 shim 放在 npm 的全局 prefix 目录中（通常为
-`%APPDATA%\npm`）。如果该目录不在 `PATH` 中，或者受支持的 Coding Agent 在安装
-Node.js 或 MemoraX Code 之前就已启动，即使包已成功安装，它仍可能提示
-`memorax-cli` 不可用。`memorax-code` 和 `memorax-cli` 都包含在
-`@memorax/memorax-code` 中，不需要单独安装 CLI。
-
-交互式 setup 会自动校验 npm 全局命令目录，并在需要时将其加入当前 setup 进程和
-Windows 用户级 `PATH`。如果当前终端无法直接启动 `memorax-code`，可在 PowerShell
-中使用 npm 的实际全局 prefix 启动 setup 并验证 CLI：
-
-```powershell
-$NpmGlobalBin = (npm prefix -g).Trim()
-$env:Path = "$NpmGlobalBin;$env:Path"
-& (Join-Path $NpmGlobalBin "memorax-code.cmd") setup
-& (Join-Path $NpmGlobalBin "memorax-cli.cmd") status
-```
-
-在 Windows PowerShell 中，所有 MemoraX 记忆命令（包括 `status`、`search`
-和 `add`）都应使用 `memorax-cli.cmd`。不要调用 `memorax-cli.ps1`，也不要修改
-PowerShell 执行策略；严格的执行策略可能阻止 npm 的 PowerShell shim，但不影响
-`.cmd` shim 正常工作。
-
-前两行只修复当前 PowerShell 进程的 `PATH`。如果 setup 提示无法更新持久化的
-Windows 用户级 `PATH`，可执行一次以下命令：
-
-```powershell
-$NpmGlobalBin = (npm prefix -g).Trim()
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$UserEntries = @($UserPath -split ";" | Where-Object { $_ })
-$NormalizedNpmGlobalBin = $NpmGlobalBin.TrimEnd("\")
-
-if (-not ($UserEntries | Where-Object {
-    $_.Trim().TrimEnd("\") -ieq $NormalizedNpmGlobalBin
-})) {
-    [Environment]::SetEnvironmentVariable(
-        "Path",
-        (($UserEntries + $NpmGlobalBin) -join ";"),
-        "User"
-    )
-}
-```
-
-setup 或上述兜底命令修改持久化 `PATH` 后，请打开一个新终端。仅当某个 Coding Agent
-在安装期间已经运行，或者仍然找不到 `memorax-cli` 时，才需要彻底退出并重启受影响的
-客户端；无需重新安装 npm 包。
-
-有关支持的配置项，请参阅[配置](docs/configuration.md)；
-更详细的诊断步骤请参阅[故障排查](docs/troubleshooting.md)。
+两个命令均由同一个包提供。请按
+[Windows PATH 修复步骤](docs/troubleshooting.md#windows-memorax-code-or-memorax-cli-is-not-found)
+启动 setup，或修复仍使用旧环境的终端。
 
 ### 体验跨会话记忆
 
@@ -250,38 +218,13 @@ MemoraX 云端不会接收模型服务商凭据或本地 Backend Token。
 memorax-code update
 ```
 
-完成过 setup 后，只要托管 Backend 持续运行，它就会自行调度非阻塞更新检查，不依赖客户端
-新建会话。稳定版跟随 npm `latest`，预览版跟随 `preview`；成功检查结果复用八小时，检查或
-reconciliation 失败后 15 分钟重试。发现新版本时，MemoraX Code 会安装精确的目标版本，
-并保留 `[clients]` 中所有显式的 `true` 或 `false` 选择。如果新版本新增了某个客户端支持、
-旧配置中还没有对应字段，并且本机能够检测到该客户端，自动 reconciliation 会默认启用它；
-显式设置为 `false` 的客户端仍保持关闭。
-
-在 Codex 下，更新 reconciliation 会先校验当前 MemoraX Code marketplace 身份以及新增或变化
-Hook 的精确哈希，然后静默信任这些 Hook。身份变化或 Hook 校验失败时会失败关闭，不会扩大信任
-范围。独立诊断命令 `memorax-code codex-plugin trust-hooks` 仍保留显式 review 行为。
-
-如需关闭后台检查，请在启动或重启托管 Backend 前设置
-`MEMORAX_CODE_AUTO_UPDATE=false`。客户端启动 Hook 只负责确保 Backend 可用，不负责更新
-节奏。上面的手动更新命令仍然可用，会沿用当前发布通道并保留配置。如果新版本修改了运行中
-客户端已经加载的集成资产，请重启或刷新 Codex、Claude Code、WorkBuddy、
-DeepSeek Harness、OpenCode 或 Trae。
-
-Windows 上，托管的 WorkBuddy 插件默认安装到 `%USERPROFILE%\.workbuddy`；
-`WORKBUDDY_HOME` 可显式覆盖默认目录。在 WorkBuddy 至少成功执行一次
-已安装 Hook 前，状态会保持为 `hook-runtime=unverified`。
+完成 setup 后，托管 Backend 运行期间也会自动检查并更新。发布通道、客户端选择和关闭后台检查的
+设置见[更新指南](INSTALL.md#update)。如果更新修改了运行中客户端已加载的集成资产，请重启或刷新客户端。
 
 ### Windows 升级提示
 
-如果您在 Windows 上从 MemoraX Code v0.1.3-v0.1.6 升级到 v0.1.7，请执行：
-
-```powershell
-memorax-code stop
-memorax-code update --latest
-memorax-code
-```
-
-该操作仅需执行一次，后续升级无需重复。
+如果较旧的 Windows 安装在升级时遇到 `EBUSY` 重命名错误，请按
+[旧版升级恢复步骤](docs/troubleshooting.md#npm-package-transition-fails)处理。
 
 ## 卸载
 
@@ -291,9 +234,8 @@ memorax-code
 memorax-code uninstall
 ```
 
-该命令会移除受管客户端集成和全局 npm 包，同时保留 `MEMORAX_CODE_HOME`
-（默认为 `~/.memorax-code`）、Claude 插件数据、模型服务配置，以及已保存到 MemoraX
-的云端记忆。请在确认不再需要后，分别清理保留的本地或云端数据。
+该命令会移除受管客户端集成和全局 npm 包，同时保留配置与已保存的记忆。
+保留的数据和重新安装后的行为见[卸载指南](INSTALL.md#uninstall)。
 
 ## 文档
 

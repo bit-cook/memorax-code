@@ -10,11 +10,12 @@ the current system, not a roadmap or a complete file inventory.
   behavior. This document explains their architectural intent.
 - [AGENTS.md](AGENTS.md) defines working rules for coding agents, runtime and
   data invariants, verification commands, and Git handoff requirements.
-- [CONTRIBUTING.md](CONTRIBUTING.md) defines the contributor workflow.
+- [CONTRIBUTING.md](CONTRIBUTING.md) defines the contributor workflow and
+  [documentation ownership](CONTRIBUTING.md#documentation-ownership).
 - [SECURITY.md](SECURITY.md) defines security and trust-boundary policy.
-- [Configuration](docs/configuration.md) and
-  [Troubleshooting](docs/troubleshooting.md) own detailed user-facing setup and
-  diagnosis.
+- [Installation](INSTALL.md) owns setup and lifecycle procedures;
+  [Configuration](docs/configuration.md) owns settings and their semantics;
+  [Troubleshooting](docs/troubleshooting.md) owns diagnosis and recovery.
 
 Architecture documentation should remain stable across ordinary refactors.
 Do not copy volatile values such as package versions, ports, Hook ABI numbers,
@@ -384,10 +385,8 @@ Important distinctions:
   is the narrow exception because it exposes no stable raw Session: its
   validated, correlated `UserPromptSubmit` prompt and `Stop` final assistant
   message are the primary Trae content authority, not a fallback.
-- Codex rollout JSONL, Claude Code and CodeBuddy/WorkBuddy transcript JSONL,
-  DSH's exact persisted Session Event Log interval, OpenCode SDK session
-  message records, and Trae's validated Hook pair are the content authorities
-  for their respective clients.
+- The [native authority map](#native-writeback-authority) identifies each
+  client's exact writeback source and owning tests.
 - Required client/session/turn identity and repository scope fail closed when
   incomplete, conflicting, or unprovable.
 - A malformed or incomplete direct `.git` directory is the sole documented
@@ -779,9 +778,9 @@ and
 
 | Concern | Authority | Derived or non-authoritative views |
 | --- | --- | --- |
-| Models, model-provider credentials, native tools, and model-provider traffic | Codex, Claude Code, DeepSeek Harness, CodeBuddy/WorkBuddy, OpenCode, or Trae | Backend and adapters must not proxy or persist this authority |
+| Models, model-provider credentials, native tools, and model-provider traffic | The native client | Backend and adapters must not proxy or persist this authority |
 | Hook command identity | Versioned, client-qualified command plus validated required session/turn fields | Parsed HTTP request objects |
-| Automatic writeback content | Codex rollout JSONL, Claude Code transcript JSONL, CodeBuddy/WorkBuddy transcript JSONL, DSH's exact persisted Session Event Log interval, OpenCode SDK session messages, or Trae's validated `UserPromptSubmit`/`Stop` Hook pair for the matching client and Turn | Hook or plugin text is not a fallback outside Trae's primary authority; trace, latest-Turn guesses, local database guesses, and another client's format are never fallbacks |
+| Automatic writeback content | The matching client and Turn's [native authority](#native-writeback-authority) | Hook or plugin text is not a fallback outside Trae's primary authority; trace, latest-Turn guesses, local database guesses, and another client's format are never fallbacks |
 | Workspace and repository identity | Backend read-only resolution held by the live repository-session runtime; its only permitted scope transition is the same-root degraded-direct-`.git` to verified-Git upgrade | Project labels and Hook `cwd` |
 | Backend connection and managed-process ownership | Versioned private connection/token/PID records plus lifecycle lock/version validation | In-memory state in any one process |
 | Package replacement intent | Versioned private package-transition record plus its bounded lock | npm process state or the presence of installed package files |
@@ -791,6 +790,22 @@ and
 | MemoraX memory results and Add acceptance | Normalized response from `provider/memorax` | Observability and trace |
 | Persisted current-turn operational state and trace history | Client-qualified local trace records | Diagnostics; not native content or general Turn-identity authority |
 | Repo Memory bundle | Repository-local `.repo_memory` files produced by the supervised job | Backend readiness and client-injected guidance |
+
+#### Native writeback authority
+
+This map is the detailed source for per-client content authority and its
+owning suites. The [automatic writeback flow](#34-automatic-writeback)
+describes completion, interruption, and recovery behavior. Test links identify
+contract coverage, not real-client E2E results.
+
+| Harness | Automatic writeback authority | Native Backend tests | Adapter tests |
+| --- | --- | --- | --- |
+| Codex | Exact Turn in rollout JSONL | [Codex](packages/ts/memorax-code-backend/test/clients/codex) | [Codex adapter](packages/ts/memorax-code-codex-adapter/test) |
+| Claude Code | Correlated prompt in transcript JSONL | [Claude](packages/ts/memorax-code-backend/test/clients/claude) | [Claude adapter](packages/ts/memorax-code-claude-adapter/test) |
+| DSH | Exact persisted Session Event Log interval | [DSH](packages/ts/memorax-code-backend/test/clients/dsh) | [DSH adapter](packages/ts/memorax-code-dsh-adapter/test) |
+| OpenCode | Matching SDK session-message records | [OpenCode](packages/ts/memorax-code-backend/test/clients/opencode) | [OpenCode adapter](packages/ts/memorax-code-opencode-adapter/test) |
+| CodeBuddy/WorkBuddy | Correlated native transcript JSONL | [CodeBuddy](packages/ts/memorax-code-backend/test/clients/codebuddy) | [CodeBuddy adapter](packages/ts/memorax-code-codebuddy-adapter/test) |
+| Trae | Validated Turn-ID and correlated `UserPromptSubmit`/`Stop` Hook pair | [Trae](packages/ts/memorax-code-backend/test/clients/trae) | [Trae adapter](packages/ts/memorax-code-trae-adapter/test) |
 
 ### 6.2 State classes and shutdown ownership
 
@@ -916,13 +931,13 @@ flowchart TD
   diagnostics CLI.
 - Artifact gates reject undeclared paths, unsafe symlinks, cache/build debris,
   and local-only data-boundary violations.
-- Installed-package tests isolate `MEMORAX_CODE_HOME`, `CODEX_HOME`,
-  `CLAUDE_CONFIG_DIR`, `DSH_HOME`, `OPENCODE_CONFIG_DIR`, and `TRAE_CN_HOME` so
-  lifecycle and client integration checks do not reuse developer state.
+- Installed-package tests isolate MemoraX Code state and every affected client
+  home so lifecycle and integration checks do not reuse developer state; use
+  the [verification isolation rules](AGENTS.md#5-verification).
 
 Root architecture and contributor guidance are repository documents, while
-`shipped-docs.json` remains the authority for user documentation included in
-the npm package.
+[shipped-docs.json](packages/npm/memorax-code/shipped-docs.json) remains the
+authority for the `docs/` pages included in the npm package.
 
 ## 8. Test Architecture and Change Routing
 
@@ -954,9 +969,9 @@ Placement rules:
   root-surface, public-route, delegation, and dependency-cycle contracts.
 - Backend behavior tests build and exercise `dist`; architecture tests inspect
   `src` directly.
-- The Backend suite discovers nested tests recursively. Codex, Claude Code,
-  DSH, OpenCode, CodeBuddy/WorkBuddy, and Trae adapter suites currently discover only flat
-  `test/*.test.mjs`; their package scripts must change before tests are nested.
+- The Backend suite discovers nested tests recursively. Adapter suites
+  currently discover only flat `test/*.test.mjs`; their package scripts must
+  change before tests are nested.
 - Adapter-common has no standalone suite. Its changes are verified through all
   affected consumers: Backend, all six adapters, and package checks when
   staged runtime layout is involved.

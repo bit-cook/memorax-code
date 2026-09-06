@@ -14,12 +14,11 @@ precedence over generated memory or historical context.
   rewrites into the task. Do not run broad auto-fix commands unless required.
 - Use English for source identifiers, comments, docstrings, and canonical
   public documentation. Keep `README.md` and `README.zh.md` synchronized for
-  user-facing changes.
+  changes to their shared content.
 - Treat `.repo_memory/` as local retrieval guidance, not current-code
   authority. It is Git-ignored and must not leak into public artifacts.
-- Use isolated `MEMORAX_CODE_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and
-  `OPENCODE_CONFIG_DIR` locations for lifecycle, install, migration, or
-  destructive tests.
+- Use isolated MemoraX Code state and all affected client homes for lifecycle,
+  install, migration, or destructive tests, as described in Section 5.
 
 ## 2. Architecture Routing
 
@@ -40,13 +39,11 @@ same change, then run the matching verification profile in Section 5.
 - Hook commands are versioned and client-qualified. Required session, turn, or
   prompt correlation must be validated at the HTTP boundary; incomplete,
   conflicting, unknown, or client-inapplicable identities fail closed.
-- Codex rollout JSONL, Claude Code and CodeBuddy/WorkBuddy transcript JSONL,
-  DSH's exact persisted Session Event Log interval, matching OpenCode SDK
-  session-message records, and Trae's validated `UserPromptSubmit`/`Stop` Hook
-  pair are the content authorities for their respective automatic writeback.
-  Hook or plugin text is not a fallback outside Trae's narrow primary-authority
-  exception; local trace, latest-turn guesses, and another client's format are
-  never fallbacks.
+- Automatic writeback uses only the matching client's native content authority
+  in the [architecture authority map](ARCHITECTURE.md#61-authority-map).
+  Hook or plugin text is not a fallback outside Trae's narrow, validated
+  `UserPromptSubmit`/`Stop` primary-authority exception; local trace,
+  latest-turn guesses, and another client's format are never fallbacks.
 - Session, turn metadata, trace, and operational identity always include the
   client. Equal native IDs from different clients must remain isolated.
 - A live session is pinned to its resolved workspace and repository scope.
@@ -79,19 +76,28 @@ same change, then run the matching verification profile in Section 5.
 - MemoraX receives only documented query/add/writeback payloads. Retained
   trace artifacts, trace-only provenance, and local transcript paths stay
   local.
-- `memorax-code` is the shared user-facing skill. Changes must work in Codex,
-  Claude Code, DSH, OpenCode, CodeBuddy/WorkBuddy, and Trae packaging and must
-  keep triggers, metadata, references, and resource paths valid.
+- `memorax-code` is the shared user-facing skill. Changes must work in every
+  supported client's packaging and must keep triggers, metadata, references,
+  and resource paths valid.
 - Packaged skills must address product users. Do not include maintainer
   runbooks, private paths, unpublished plans, secrets, internal fixtures, or
   local diagnostic artifacts.
-- Public commands, requirements, data handling, or client support changes
-  update both README files. Configuration changes update
-  `docs/configuration.md`; user-facing diagnosis updates
-  `docs/troubleshooting.md`; vulnerability and trust-boundary changes update
-  `SECURITY.md`.
+- Update the document that owns the changed behavior, following
+  [documentation ownership](CONTRIBUTING.md#documentation-ownership).
+  Update both README files when their product overview, supported-client
+  entry, requirements, quick start, or navigation changes. Detailed internal
+  behavior belongs in its owning document; do not repeat it in each entrypoint.
 
 ## 5. Verification
+
+For lifecycle, install, migration, or destructive tests, use a temporary user
+home and isolated `MEMORAX_CODE_HOME` plus all affected client homes. The
+primary client overrides are `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `DSH_HOME`,
+`OPENCODE_CONFIG_DIR`, `CODEBUDDY_HOME`, and `TRAE_CN_HOME`. Override or clear
+inherited aliases (`CLAUDE_HOME`, `WORKBUDDY_HOME`, and `TRAE_HOME`), XDG paths,
+and client command overrides when they could select developer state or a real
+client instead of a fixture. Check the affected path resolver when adding a
+client or changing discovery.
 
 Run the smallest relevant check first, then expand when a change crosses
 boundaries:
@@ -112,6 +118,8 @@ boundaries:
 - **Adapter-common/shared Hook**: `adapter-common` has no standalone suite. Run
   affected Backend tests and all six adapter suites; add
   `make npm-package-check` when staged runtime or package layout changes.
+- **Lifecycle report interpretation**: run the Backend profile; add the
+  Install/artifacts profile for CLI or lifecycle behavior changes.
 - **Trace/local-only boundary**: for trace, provider, or outbound transport,
   run `make test-npm-package` in addition to affected package tests.
 - **Documentation**: `make docs-check`.

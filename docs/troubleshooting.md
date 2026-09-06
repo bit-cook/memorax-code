@@ -57,29 +57,65 @@ Setup requires terminal input and terminal-visible stderr. A pipe, background
 process, or redirected stdin/stderr cannot complete setup; rerun it in a normal
 interactive terminal.
 
-On Windows, interactive setup verifies npm's global command directory and adds
-it to the current setup process and the Windows user `PATH` when needed. If the
-current shell cannot find `memorax-code`, use npm's actual global prefix to
-bootstrap setup:
+## Windows: `memorax-code` or `memorax-cli` is not found
+
+A global npm installation places command shims in npm's global prefix
+(commonly `%APPDATA%\npm`). If that directory is missing from `PATH`, or a
+coding agent was started before installation, commands may be unavailable even
+though the package is installed. The same package installs both `memorax-code`
+and `memorax-cli`; do not install a separate CLI package.
+
+Interactive setup verifies npm's global command directory and adds it to the
+current setup process and the Windows user `PATH` when needed. If the current
+shell cannot find `memorax-code`, use npm's actual global prefix to bootstrap
+setup and verify the CLI in PowerShell:
 
 ```powershell
 $NpmGlobalBin = (npm prefix -g).Trim()
 $env:Path = "$NpmGlobalBin;$env:Path"
 & (Join-Path $NpmGlobalBin "memorax-code.cmd") setup
+& (Join-Path $NpmGlobalBin "memorax-cli.cmd") status
 ```
 
-The same npm package installs both `memorax-code` and `memorax-cli`; do not
-install a separate CLI package. Open a new terminal after setup changes the
-user `PATH`. Restart or refresh only coding agents that were already running
-or still cannot find `memorax-cli`.
+Use `memorax-cli.cmd` for all memory commands, including `status`, `search`, and
+`add`. Do not invoke `memorax-cli.ps1` or change PowerShell execution policy.
+
+The first two lines repair `PATH` only for the current PowerShell process. If
+setup reports that it could not update the persistent Windows user `PATH`, add
+the global prefix once:
+
+```powershell
+$NpmGlobalBin = (npm prefix -g).Trim()
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$UserEntries = @($UserPath -split ";" | Where-Object { $_ })
+$NormalizedNpmGlobalBin = $NpmGlobalBin.TrimEnd("\")
+
+if (-not ($UserEntries | Where-Object {
+    $_.Trim().TrimEnd("\") -ieq $NormalizedNpmGlobalBin
+})) {
+    [Environment]::SetEnvironmentVariable(
+        "Path",
+        (($UserEntries + $NpmGlobalBin) -join ";"),
+        "User"
+    )
+}
+```
+
+Open a new terminal after setup or the fallback changes the persistent `PATH`.
+Fully exit and restart a coding agent if it was already running during
+installation or still cannot find `memorax-cli`. Reinstalling the package is
+not required.
 
 ## Setup does not complete
 
 Setup writes
 `$MEMORAX_CODE_HOME/runtime/setup/setup-completion.json` only after
 configuration, client and Hook reconciliation, Backend start, and final
-readiness checks succeed. Until then, running `memorax-code` with no command
-points back to `memorax-code setup`.
+readiness checks succeed. If setup has not completed, rerun
+`memorax-code setup` in an interactive terminal and resolve the reported
+failure. For older installations with a complete configuration, the
+no-argument command can perform a one-time migration; see
+[setup-completion behavior](configuration.md#setup-automatic-update-and-package-transition-state).
 
 If secure credential setup fails, confirm that the operating-system credential
 backend is available to the same logged-in user and that the MemoraX service is
@@ -136,8 +172,9 @@ Background checks start only after setup has written a valid
 `$MEMORAX_CODE_HOME/runtime/setup/setup-completion.json` record and the managed
 Backend is running. Confirm that `MEMORAX_CODE_AUTO_UPDATE` was not set to
 `false` when that Backend started. Client SessionStart events are not update
-triggers. A successful check is reused for eight hours; failures retry after 15
-minutes.
+triggers. See
+[automatic update settings](configuration.md#setup-automatic-update-and-package-transition-state)
+for the check and retry intervals.
 
 The installed version and next check deadline are recorded at:
 
@@ -475,11 +512,10 @@ when repository isolation matters.
 
 ## Model-provider requests fail while MemoraX Code is healthy
 
-MemoraX Code does not proxy Codex, Claude Code, DSH, or OpenCode model
-requests. If `memorax-code status` and the available client-specific doctor
-are healthy, inspect the provider URL, credentials, model selection, and
-network settings owned by that client. Do not copy model-provider credentials into
-`$MEMORAX_CODE_HOME`.
+MemoraX Code does not proxy client model requests. If `memorax-code status` and
+the available client-specific diagnostics are healthy, inspect the provider
+URL, credentials, model selection, and network settings owned by that client.
+Do not copy model-provider credentials into `$MEMORAX_CODE_HOME`.
 
 ## Safe issue reports
 
@@ -488,12 +524,10 @@ Collect structured, redacted output:
 ```sh
 memorax-code status --json
 memorax-cli status --json
-memorax-code-codex doctor --json
-memorax-code-claude doctor --json
-memorax-code status --clients dsh --json
-memorax-code-opencode doctor --json
 ```
 
+For a client-specific failure, also collect the affected client's diagnostic
+from the start of this guide with `--json`.
 Include the MemoraX Code version, operating system, affected client,
 reproduction steps, failing command, and the smallest relevant log excerpt.
 

@@ -1,21 +1,26 @@
 # Install MemoraX Code
 
 The public MemoraX Code release is distributed as one platform-neutral npm
-package for macOS, Linux, and Windows. This guide covers the normal end-user
-installation. For a source checkout and contributor setup, see
+package for macOS, Linux, and Windows. This guide covers the installation,
+activation, verification, update, and uninstall workflows. See
+[Configuration](docs/configuration.md) for settings and runtime state, or
+[Troubleshooting](docs/troubleshooting.md) for recovery steps.
+For a source checkout and contributor setup, see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Requirements
 
 - Node.js 20 or newer (Node.js 24 LTS recommended) and npm.
-- At least one of Codex, Claude Code, DeepSeek Harness (DSH), OpenCode Desktop,
-  or the OpenCode CLI available in the environment where MemoraX Code will
-  run. DSH must already be installed globally or initialized through its
-  official `npx` workflow; MemoraX Code does not install or update it. DSH
-  integration requires at least one existing Profile and `pnpm` on `PATH`
-  because DSH's native Profile plugin manager delegates package changes to it.
-  The tested DSH baseline is `0.1.0-rc.6`; other valid semantic versions are
-  reported as untested rather than rejected automatically.
+- At least one of Codex, Claude Code, CodeBuddy/WorkBuddy, DeepSeek Harness
+  (DSH), OpenCode Desktop or CLI, or Trae available in the environment where
+  MemoraX Code will run. Each client retains its own runtime requirements.
+- For DSH, current releases require Node.js `^22.19.0 || >=24.0.0`. Install DSH
+  globally or initialize it through its official `npx` workflow first;
+  MemoraX Code does not install or update it. Integration requires at least one
+  existing Profile and `pnpm` on `PATH` because DSH's native Profile plugin
+  manager delegates package changes to it. The tested DSH baseline is
+  `0.1.0-rc.6`; other valid semantic versions are reported as untested rather
+  than rejected automatically.
 - On Linux, `/usr/bin/secret-tool` from libsecret and an available Secret
   Service in the current user session for setup-managed credentials.
 
@@ -41,6 +46,10 @@ An installation that was already stopped remains stopped.
 Do not use `--ignore-scripts` for a normal install or update. It skips the
 safe retirement and restoration of a running managed Backend.
 
+If Windows cannot find an installed command, follow the
+[Windows PATH repair steps](docs/troubleshooting.md#windows-memorax-code-or-memorax-cli-is-not-found).
+Both `memorax-code` and `memorax-cli` are included in this package.
+
 ## 2. Connect a MemoraX Account (Recommended)
 
 [Create a MemoraX account](https://platform.memorax.net/) or use an existing
@@ -53,6 +62,10 @@ memorax-code setup --existing-account
 This mode asks for the username used by the existing MemoraX Code connection
 and accepts the API key through masked local terminal input. Never paste an API
 key into a chat, repository, screenshot, or public issue.
+
+For another device already using MemoraX Code, find the username and API key in
+its private configuration file (normally `~/.memorax-code/config.toml`), then
+enter them locally during setup on the new device. Keep that file private.
 
 ### Or Try Without an Account (90-Day Guest Mode)
 
@@ -84,10 +97,13 @@ connection and re-detect its preferences. Setup detects supported clients,
 installs or refreshes their integrations, starts the local Backend, verifies
 status, and records completion only after the final checks succeed.
 
-Running `memorax-code` with no command reports setup guidance until completion
-is recorded; afterward it shows status. Setup requires an interactive terminal
-and exits without recording completion when stdin or stderr is detached or
-redirected.
+Running `memorax-code` with no command shows status after setup is complete.
+For an older installation with a complete configuration but no completion
+record, an interactive invocation runs the one-time setup migration;
+otherwise it points to `memorax-code setup`. See
+[setup-completion behavior](docs/configuration.md#setup-automatic-update-and-package-transition-state).
+Setup requires an interactive terminal and exits without recording completion
+when stdin or stderr is detached or redirected.
 
 During setup, MemoraX Code explains that automatic writeback from trusted
 workspace sessions sends selected user prompts and matching final assistant
@@ -104,28 +120,28 @@ credentials, model, or login mode.
 After the first installation, restart or refresh every detected client before
 opening a new MemoraX Code session.
 
-For Codex, enable **MemoraX Code Codex Adapter** from Plugins or `/plugins` if
-it is not already enabled. Claude Code registration is handled by the
-installer.
+| Client | Complete activation |
+| --- | --- |
+| Codex | Enable **MemoraX Code Codex Adapter** from Plugins or `/plugins` if it is not already enabled. |
+| Claude Code | Setup registers the managed marketplace plugin and Hooks. Restart or refresh the client to load them. |
+| CodeBuddy/WorkBuddy | Setup registers the managed marketplace plugin, Hooks, and Skill. Restart or refresh WorkBuddy to load them. The lifecycle client ID is `codebuddy`. |
+| DeepSeek Harness | Setup registers the integration in existing Profiles. Restart or refresh DSH to load it. Existing Profiles and session data are retained. |
+| OpenCode | Restart or refresh OpenCode to load the managed plugin and Skill through auto-discovery. |
+| Trae | In **Settings → Hooks → Global → Configured Hooks**, enable the registered Global Hooks once. Setup installs the Hooks and Skill, but the Global Hooks switch requires manual activation. |
 
-OpenCode registration uses its plugin and skill auto-discovery. Restart or
-refresh OpenCode after installation so the managed integration is loaded.
+If an agent performs installation, it should remind the user to complete the
+Trae activation step. It must not report that step as complete based only on
+successful setup.
 
-DSH registration is applied to the existing Profiles found under `DSH_HOME`
-(`~/.dsh` by default). Restart or refresh DSH after installation so those
-Profiles load the managed integration. MemoraX Code does not replace the
-Profiles or their session data. If no global `dsh` command is available,
-MemoraX Code can use the DSH runtime already linked into the existing Profile
-dependency tree. It never invokes `npx` or installs or updates DSH.
-If automatically discovered DSH is unavailable, setup keeps the Backend and
-other detected clients running and reports the DSH integration as degraded.
-After repairing DSH, run `memorax-code start --clients dsh` to reconcile it;
-explicit DSH selection reports failure until the integration is ready.
+For custom client homes, see the
+[integration path settings](docs/configuration.md). If DSH is reported as
+degraded, other detected clients and the Backend can still run; follow the
+[DSH recovery steps](docs/troubleshooting.md#deepseek-harness-profile-integration-is-inactive).
 
-Open the client in a real project directory and submit at least one prompt
-before using the client doctor as the final verification. Until the Hooks have
-observed a workspace session, workspace capture can correctly report that it
-still needs attention.
+Open each client in a real project directory, start a new session, and submit
+at least one prompt before final verification. A configured integration may
+report `hook-runtime=unverified` until a real Hook event changes it to
+`observed`; workspace capture can also need attention before that first event.
 
 ## 4. Verify the Installation
 
@@ -137,19 +153,23 @@ memorax-code status
 memorax-cli status
 ```
 
-Codex, Claude Code, and OpenCode also provide client-specific doctor commands:
+In Windows PowerShell, use `memorax-cli.cmd status`.
 
-```bash
-memorax-code-codex doctor
-memorax-code-claude doctor
-memorax-code-opencode doctor
-```
+Check the clients you installed:
 
-`memorax-code status` checks the local Backend and selected client
-integrations, including DSH Profile and OpenCode plugin status. DSH uses this
-shared status command rather than a separate doctor binary. `memorax-cli status`
-checks whether the local MemoraX configuration, workspace scope, and
-memory switches resolve without printing the API key. It does not send a test
+| Client | Diagnostic command |
+| --- | --- |
+| Codex | `memorax-code-codex doctor` |
+| Claude Code | `memorax-code-claude doctor` |
+| CodeBuddy/WorkBuddy | `memorax-code-codebuddy status --json` |
+| DeepSeek Harness | `memorax-code status --clients dsh` |
+| OpenCode | `memorax-code-opencode doctor` |
+| Trae | `memorax-code-trae status --json` |
+
+`memorax-code status` checks the local Backend and every selected client
+integration. `memorax-cli status` checks whether the local MemoraX
+configuration, workspace scope, and memory switches resolve without printing
+the API key. It does not send a test
 request to MemoraX; the first real search or write verifies remote connectivity
 and credentials.
 
@@ -191,22 +211,18 @@ running, package replacement briefly stops it, starts the new version with the
 retained client selection, and verifies status. A stopped installation remains
 stopped.
 
-After setup has completed, the managed Backend schedules detached update checks
-while it remains running. The cadence is independent of client sessions.
-Stable packages follow npm `latest`; prerelease packages follow `preview`.
-Successful checks are throttled for eight hours, and failures retry after 15
-minutes. Set `MEMORAX_CODE_AUTO_UPDATE=false` before starting or restarting the
-managed Backend to disable this behavior.
+After setup has completed, the managed Backend also checks for updates while
+running. Stable packages follow npm `latest`; prerelease packages follow
+`preview`. Set `MEMORAX_CODE_AUTO_UPDATE=false` before starting or restarting
+the managed Backend to disable background checks. See
+[automatic update settings and state](docs/configuration.md#setup-automatic-update-and-package-transition-state)
+for scheduling, reconciliation, and Codex Hook verification details.
 
-A changed target is installed by exact version. The updater then runs an
-internal non-interactive reconciliation that preserves the existing `[clients]`
-selection, MemoraX connection, and memory configuration. It does not enable a
-newly detected client. For Codex, reconciliation compares the pre-update and
-post-update MemoraX Code Hook sets, requires the same marketplace identity, and
-silently trusts only the exact new or changed Hook hashes returned by the
-check. Identity drift or an unverifiable Hook set fails closed and is retried;
-the standalone `memorax-code codex-plugin trust-hooks` command remains an
-explicit diagnostic workflow.
+Automatic reconciliation preserves explicit `true` and `false` client choices,
+the MemoraX connection, and memory configuration. It enables a detected client
+whose key is missing from an older configuration; an explicit `false` remains
+disabled. See [client selection](docs/configuration.md#client-selection) for
+the complete selection rules.
 
 A manual interactive `memorax-code update` may still offer newly available
 clients, but verified Codex Hook changes no longer require confirmation.
@@ -214,6 +230,11 @@ Without a completed setup, or in a non-interactive manual update, package
 replacement can still complete and the updater tells you to run
 `memorax-code setup` explicitly. Direct npm updates perform only package
 replacement and do not run product reconciliation.
+
+Restart or refresh clients when an update changes their loaded integration
+assets, then repeat [installation verification](#4-verify-the-installation).
+For an `EBUSY` error when upgrading older Windows installations, follow the
+[package transition recovery](docs/troubleshooting.md#npm-package-transition-fails).
 
 ## Uninstall
 
@@ -239,17 +260,6 @@ default setup reuses a complete retained connection automatically. A normal
 
 ## Troubleshooting
 
-Start with:
-
-```bash
-memorax-code status
-memorax-cli status
-memorax-code-codex doctor
-memorax-code-claude doctor
-memorax-code status --clients dsh
-memorax-code-opencode doctor
-memorax-code logs
-```
-
-See [Troubleshooting](docs/troubleshooting.md) for recovery steps and safe issue
-reporting guidance.
+Use the [verification commands](#4-verify-the-installation) above to identify
+the failing component. See [Troubleshooting](docs/troubleshooting.md) for
+recovery steps and safe issue reporting guidance.

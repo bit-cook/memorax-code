@@ -53,10 +53,13 @@ and validation sooner.
 ## Quick Start
 
 Prepare Node.js 20+ (Node.js 24 LTS recommended) and at least one of Codex,
-Claude Code, WorkBuddy, DeepSeek Harness, OpenCode, or Trae. Each coding-agent
-harness retains its own runtime requirements; current DeepSeek Harness releases
-require Node.js `^22.19.0 || >=24.0.0`. DSH may be installed globally or
-initialized beforehand through its official `npx` workflow.
+Claude Code, WorkBuddy, DeepSeek Harness, OpenCode, or Trae.
+
+For DeepSeek Harness (DSH), current releases require Node.js
+`^22.19.0 || >=24.0.0`. Install or initialize DSH first, create at least one
+Profile, and ensure `pnpm` is on `PATH` before running setup. See
+[installation requirements](INSTALL.md#requirements) for more detail,
+Linux credential storage, and remote environments.
 
 ### Install and Connect
 
@@ -75,12 +78,14 @@ one, then run:
 memorax-code setup --existing-account
 ```
 
+Follow the setup prompts to enter your MemoraX username and API key locally.
+
 > [!TIP]
-> Using MemoraX Code across devices? Find the MemoraX username and API key
-> needed by setup in the MemoraX Code configuration file on a configured device
-> (normally `~/.memorax-code/config.toml`), then enter them locally during setup
-> on another device. This file contains your API key—keep it private and never
-> paste it into chats or public issues.
+> Using MemoraX Code across devices? Find the username and API key in the
+> configuration file on a configured device (normally
+> `~/.memorax-code/config.toml`), then enter them in the local setup terminal
+> on the new device. This file contains your API key; keep it private and
+> never paste it into chats or public issues.
 
 #### Or Try Without an Account (90-Day Guest Mode)
 
@@ -90,96 +95,61 @@ To start immediately and connect an account later, run:
 memorax-code setup
 ```
 
-To activate your guest account, first run this command directly in your local
-terminal:
+To keep your guest memory when registering later, first run this command
+directly in your local terminal:
 
 ```bash
 memorax-code account --show-mark-id
 ```
 
-After obtaining the Mark ID, create your MemoraX account. The platform does
-not currently support attaching a Mark ID to an account that has already been
-registered.
+> [!IMPORTANT]
+> Obtain the Mark ID before registering, then use it to activate your guest
+> account on [MemoraX](https://platform.memorax.net/). The platform does not
+> currently support attaching a Mark ID to an account that has already been
+> registered.
+
+#### 3. Activate and Verify
 
 Both setup paths automatically detect supported coding agents. Restart or
 refresh every detected coding agent after setup.
 
-> [!IMPORTANT]
-> **Trae only:** setup installs the managed Skill and Global Hooks, but Trae
-> requires its Global Hooks switch to be enabled manually. In Trae, open
-> **Settings → Hooks → Global → Configured Hooks** and enable the registered
-> hooks once. Then start a new Trae session and send one prompt. Run
-> `memorax-code status` to confirm the Trae Hook runtime changes from
-> `unverified` to `observed`. If a coding agent performs the installation, it
-> should explicitly remind the user to complete this Trae-only UI step. Other
-> supported coding agents do not require it.
+- **Codex:** enable **MemoraX Code Codex Adapter** from Plugins or `/plugins`
+  if it is not already enabled.
+- **Trae:** open **Settings → Hooks → Global → Configured Hooks** and enable
+  the registered Global Hooks once. Setup installs the Hooks and Skill;
+  this switch requires manual activation.
+
+Open a project, start a new client session, and send one prompt. Then run
+these commands from the project directory:
+
+```bash
+memorax-code status
+memorax-cli status
+```
+
+In Windows PowerShell, use `memorax-cli.cmd status`. A configured integration
+may still report `hook-runtime=unverified` until the client executes its Hook.
+After a Hook executes successfully, that client's Hook runtime should change
+to `observed`.
+
+`memorax-code status` checks the local Backend and client integrations;
+`memorax-cli status` checks the local memory configuration and workspace scope.
+To verify memory works across sessions, follow the example below. For
+client-specific diagnostic commands, see
+[installation verification](INSTALL.md#4-verify-the-installation).
 
 ### Installation Troubleshooting
 
-If the initial setup does not work as expected, check these common cases:
-
-| Symptom | Recommended fix |
-| --- | --- |
-| Installation fails with an unsupported Node.js version | Run `node --version` and upgrade to Node.js 20 or later before reinstalling MemoraX Code. |
-| The package installed but setup did not start | This is expected. Run the appropriate setup command above from a normal interactive terminal. |
-| Windows reports that `memorax-code` or `memorax-cli` is not recognized | Follow the Windows PATH steps below. Both commands are installed by the same package; do not install a separate `memorax-cli` package. |
-| Search, retrieval, or writeback is unavailable after setup | Run `memorax-code status` and the platform memory command (`memorax-cli.cmd status` in Windows PowerShell, `memorax-cli status` on macOS and Linux), then follow the detailed troubleshooting guide. |
+Package installation does not launch setup automatically; run one of the setup
+commands above in an interactive terminal. For incomplete setup or unavailable
+memory, start with the status commands and follow
+[Troubleshooting](docs/troubleshooting.md).
 
 #### Windows: `memorax-code` or `memorax-cli` Is Not Found
 
-On Windows, a global npm installation places command shims in npm's global
-prefix (commonly `%APPDATA%\npm`). If that directory is missing from `PATH`,
-or a supported coding agent was started before Node.js or MemoraX Code was
-installed, it may report that `memorax-cli` is unavailable even though the
-package is installed. `memorax-code` and `memorax-cli` are both included in
-`@memorax/memorax-code`; no separate CLI installation is required.
-
-Interactive setup automatically verifies npm's global command directory and,
-when needed, adds it to the current setup process and the Windows user `PATH`.
-If the current shell cannot start the bare `memorax-code` command, use npm's
-actual global prefix to bootstrap setup and verify the CLI in PowerShell:
-
-```powershell
-$NpmGlobalBin = (npm prefix -g).Trim()
-$env:Path = "$NpmGlobalBin;$env:Path"
-& (Join-Path $NpmGlobalBin "memorax-code.cmd") setup
-& (Join-Path $NpmGlobalBin "memorax-cli.cmd") status
-```
-
-In Windows PowerShell, use `memorax-cli.cmd` for all MemoraX memory commands,
-including `status`, `search`, and `add`. Do not invoke `memorax-cli.ps1` or
-change PowerShell execution policy; restrictive policies may block npm's
-PowerShell shim even though the `.cmd` shim works normally.
-
-The first two lines repair `PATH` for the current PowerShell process. If setup
-reports that it could not update the persistent Windows user `PATH`, add the
-global prefix once:
-
-```powershell
-$NpmGlobalBin = (npm prefix -g).Trim()
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$UserEntries = @($UserPath -split ";" | Where-Object { $_ })
-$NormalizedNpmGlobalBin = $NpmGlobalBin.TrimEnd("\")
-
-if (-not ($UserEntries | Where-Object {
-    $_.Trim().TrimEnd("\") -ieq $NormalizedNpmGlobalBin
-})) {
-    [Environment]::SetEnvironmentVariable(
-        "Path",
-        (($UserEntries + $NpmGlobalBin) -join ";"),
-        "User"
-    )
-}
-```
-
-Open a new terminal after setup or the fallback changes the persistent `PATH`.
-Fully exit and restart an affected coding agent only if it was already running
-during installation or still cannot find `memorax-cli`; reinstalling the
-package is not required.
-
-See [Configuration](docs/configuration.md) for supported settings and
-[Troubleshooting](docs/troubleshooting.md) for detailed diagnostics.
-
+Both commands are included in the same package. Follow the
+[Windows PATH repair steps](docs/troubleshooting.md#windows-memorax-code-or-memorax-cli-is-not-found)
+to bootstrap setup or repair a stale terminal environment.
 
 ### Try Cross-Session Memory
 
@@ -290,45 +260,15 @@ For a global npm installation:
 memorax-code update
 ```
 
-A completed setup enables the managed Backend to schedule non-blocking update
-checks for as long as it remains running; the cadence does not depend on a new
-client session. Stable installations follow npm `latest`; prerelease
-installations follow `preview`. A successful check is reused for eight hours,
-while a failed check or reconciliation is retried after 15 minutes.
-When the published target changes, MemoraX Code installs that exact version and
-preserves every explicit `true` or `false` choice in `[clients]`. If the release
-adds support for a client whose key is absent from an older configuration and
-that client is detected locally, automatic reconciliation enables it by
-default. An explicit `false` remains disabled.
-
-For Codex, update reconciliation verifies the current MemoraX Code marketplace
-identity and the exact new or changed Hook hashes, then trusts those Hooks
-silently. An identity change or failed Hook check fails closed instead of
-granting broader trust. The standalone `memorax-code codex-plugin trust-hooks`
-diagnostic command keeps its explicit review behavior.
-
-Set `MEMORAX_CODE_AUTO_UPDATE=false` before starting or restarting the managed
-Backend to disable background checks. Client startup Hooks only ensure that the
-Backend is available; they do not own the update cadence. The manual command
-above remains available and follows the installed release channel while
-preserving configuration. Restart or refresh a client when a release changes
-integration assets that the running client has already loaded.
-
-On Windows, the managed WorkBuddy plugin installs to `%USERPROFILE%\.workbuddy`
-by default. `WORKBUDDY_HOME` remains an explicit override.
-Its status remains `hook-runtime=unverified` until WorkBuddy executes the installed Hook at least once.
+Setup also enables background updates while the managed Backend is running.
+See the [update guide](INSTALL.md#update) for release channels, client selection,
+and the setting to disable background checks. Restart or refresh a client after
+an update changes integration assets it has already loaded.
 
 ### Windows Upgrade Note
 
-If you are upgrading MemoraX Code v0.1.3-v0.1.6 to v0.1.7 on Windows, run:
-
-```powershell
-memorax-code stop
-memorax-code update --latest
-memorax-code
-```
-
-This one-time step is not required for later upgrades.
+For older Windows installations that fail with an `EBUSY` rename error, follow
+the [legacy upgrade recovery](docs/troubleshooting.md#npm-package-transition-fails).
 
 ## Uninstall
 
@@ -339,9 +279,8 @@ memorax-code uninstall
 ```
 
 This removes managed integrations and the global package while retaining
-`MEMORAX_CODE_HOME` (default `~/.memorax-code`), Claude plugin data, provider
-configuration, and memories stored in MemoraX. Remove retained local or cloud
-data separately only after reviewing what you still need.
+configuration and stored memories. See the [uninstall guide](INSTALL.md#uninstall)
+for the retained data and reinstall behavior.
 
 ## Documentation
 

@@ -48,7 +48,8 @@ Please allow time for triage and remediation before public disclosure.
   installed npm package name and its `latest` or `preview` tag. Set
   `MEMORAX_CODE_AUTO_UPDATE=false` when deployment policy requires manual
   package review. A changed target is installed by exact version and
-  reconciliation preserves the configured client selection.
+  reconciliation preserves explicit client choices. Selection of newly
+  detected clients is described in [Configuration](docs/configuration.md#client-selection).
 - Codex update reconciliation may trust new or changed Hooks without a prompt
   only after the current marketplace identity and exact Hook selection are
   validated. The selection is checked again before and after the config write;

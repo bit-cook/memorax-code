@@ -22,29 +22,20 @@ npm ci --prefix packages/ts/memorax-code-backend
 
 Do not commit credentials, `.env.local`, local client transcripts, MemoraX
 content, generated trace data, package staging, or machine-specific paths.
-Use isolated `MEMORAX_CODE_HOME` and client homes (`CODEX_HOME`,
-`CLAUDE_CONFIG_DIR`, `DSH_HOME`, `OPENCODE_CONFIG_DIR`, `CODEBUDDY_HOME`, and
-`TRAE_CN_HOME`) for lifecycle, install, or destructive tests.
+Use isolated MemoraX Code state and all affected client homes for lifecycle,
+install, migration, or destructive tests. Follow the environment-isolation
+rules in [Verification](AGENTS.md#5-verification).
 
 ## Repository Ownership
 
-| Area | Owns | Does not own |
-| --- | --- | --- |
-| `memorax-code-backend` | Backend lifecycle, typed Hook HTTP, memory service, MemoraX adapter, and local trace | Client provider execution or credentials |
-| `memorax-code-adapter-common` | Durable runtime records, cross-process configuration primitives, shared Hook and Repo Memory helpers | Client transcript formats or plugin policy |
-| `memorax-code-codex-adapter` | Codex plugin, Hooks, native session/workspace observation, diagnostics, bundled skill | Codex provider configuration or login |
-| `memorax-code-claude-adapter` | Claude Code plugin, Hooks, native observation, diagnostics | Anthropic provider configuration or login |
-| `memorax-code-dsh-adapter` | Cordis Turn bridge, Profile lifecycle, runtime bundles, and shared-skill integration | DSH provider or Session ownership |
-| `memorax-code-opencode-adapter` | Plugin, managed loader, shared-skill installation, and diagnostics | OpenCode provider configuration or native message interpretation |
-| `memorax-code-codebuddy-adapter` | CodeBuddy/WorkBuddy plugin, Hooks, transcript bridge, and shared-skill installation | CodeBuddy provider configuration or native transcript interpretation |
-| `memorax-code-trae-adapter` | Global Hook merging, runtime generations, shared-skill installation, and diagnostics | Trae provider settings or application-level Hook activation |
-| `packages/npm/memorax-code` | Public CLI, installation, update, uninstall, postinstall, and package layout | Product runtime authority |
-| `scripts` and `.github` | Repeatable repository checks, packaging, and CI | Runtime behavior |
-
 The Backend is a local memory and lifecycle service, not a model-provider
-proxy. All six clients continue to own models, provider credentials, tool
-execution, and native conversation data. See [Architecture](ARCHITECTURE.md)
-for the authoritative package boundaries and runtime flows.
+proxy. Clients own models, provider credentials, tool execution, and native
+conversation data. Use the architecture's
+[package ownership map](ARCHITECTURE.md#21-repository-components) to choose the
+owning package and its
+[capability map](ARCHITECTURE.md#43-capability-ownership) to place Backend
+implementation. Shared orchestration stays separate from native client
+interpretation and deployment.
 
 ## Making a Change
 
@@ -52,12 +43,41 @@ for the authoritative package boundaries and runtime flows.
 2. Keep behavior changes separate from unrelated formatting, renaming, or
    dependency updates.
 3. Add or update the closest test for a changed contract.
-4. Update both root README files when public commands, requirements, supported
-   clients, or data handling change.
-5. Update [Configuration](docs/configuration.md) for configuration changes and
-   [Troubleshooting](docs/troubleshooting.md) for user-facing diagnosis.
-6. Run focused checks first, then broaden validation when the change crosses
+4. Update the detailed source identified in
+   [Documentation Ownership](#documentation-ownership), then any affected
+   entrypoint summaries or links.
+5. Run focused checks first, then broaden validation when the change crosses
    package or lifecycle boundaries.
+
+## Documentation Ownership
+
+Each kind of information has one detailed home. Other documents should provide
+the summary or link their readers need. README must remain a self-contained
+guide to ordinary installation and first use: do not replace essential
+onboarding steps with links solely to avoid duplication. Advanced procedures,
+detailed recovery, and implementation contracts belong in their owning guides.
+Current source and executable tests remain authoritative for behavior.
+
+| Document | Owns | Update when |
+| --- | --- | --- |
+| [README](README.md) and [Chinese README](README.zh.md) | Product overview, supported-client entry, requirements, ordinary installation, account or guest setup, required client activation, success verification, first-use walkthrough, and navigation | Entry information or ordinary onboarding changes; keep both languages synchronized. Detailed configuration, recovery, or internal requirements alone do not require a README edit. |
+| [npm README](packages/npm/memorax-code/README.md) | A standalone npm entrypoint and links to the detailed guides | The published package's quick start or navigation changes |
+| [Installation](INSTALL.md) | Complete installation, setup, upgrade, and removal reference, including client activation and advanced or special-environment procedures | A user must perform different setup or lifecycle steps |
+| [Configuration](docs/configuration.md) | Settings, defaults, paths, selection and update semantics | Configuration meaning or runtime configuration behavior changes |
+| [Troubleshooting](docs/troubleshooting.md) | Symptoms, diagnosis, and recovery steps | A diagnosis or recovery procedure changes |
+| [Architecture](ARCHITECTURE.md) | Package and capability ownership, runtime flows, authority, dependencies, packaging boundaries, and test placement | A documented boundary changes; use its [maintenance criteria](ARCHITECTURE.md#9-maintaining-this-document) |
+| [Agent guide](AGENTS.md) | Coding-agent rules, invariants, the complete verification profiles, and Git handoff | Working rules or verification requirements change |
+| [Contributor guide](CONTRIBUTING.md) | Human contributor workflow, documentation routing, and the harness onboarding checklist | The contribution or onboarding workflow changes |
+| [Security policy](SECURITY.md) | Vulnerability reporting, trust policy, and data-protection guarantees | A security or trust boundary changes; implementation maps link to this policy |
+| [Changelog](CHANGELOG.md) | Notable user-facing release changes | Recording a release or its pending notes; internal-only refactors and tests normally do not need an entry |
+| [Canonical shared Skill](packages/ts/memorax-code-codex-adapter/skills/memorax-code/SKILL.md) and its references | Product instructions consumed by coding clients | Agent-facing product behavior changes; preserve shared materialization and keep maintainer runbooks out of the Skill |
+
+Keep detailed settings in Configuration and troubleshooting procedures in
+Troubleshooting even when Installation links to them. Preserve existing links
+and heading anchors when reorganizing a document. The `docs/` pages included
+in the npm artifact are declared by
+[shipped-docs.json](packages/npm/memorax-code/shipped-docs.json); update its
+registration and the documentation checks if shipped paths change.
 
 ## Adding a Harness
 
@@ -112,22 +132,16 @@ and recovery cases in that client's tests.
    `scripts`, and shared Skill scripts; a new runtime directory convention
    requires updating the scan and source-mapping checks. Add the adapter
    suite to the repository and platform checks, update architecture and public
-   client documentation, and run the relevant validation profiles below.
+   client documentation, and run the relevant
+   [verification profiles](AGENTS.md#5-verification).
 
 ### Harness Coverage Map
 
-The table locates existing native contracts; it is not a record of real-client
-E2E results. Each row also participates in the shared runtime, lifecycle
-catalog, npm source-mapping, test-entry, and local-only trace checks above.
-
-| Harness | Automatic writeback authority | Native Backend tests | Adapter tests |
-| --- | --- | --- | --- |
-| Codex | Exact Turn in rollout JSONL | [Codex](packages/ts/memorax-code-backend/test/clients/codex) | [Codex adapter](packages/ts/memorax-code-codex-adapter/test) |
-| Claude Code | Correlated prompt in transcript JSONL | [Claude](packages/ts/memorax-code-backend/test/clients/claude) | [Claude adapter](packages/ts/memorax-code-claude-adapter/test) |
-| DSH | Exact persisted Session Event Log interval | [DSH](packages/ts/memorax-code-backend/test/clients/dsh) | [DSH adapter](packages/ts/memorax-code-dsh-adapter/test) |
-| OpenCode | Matching SDK session-message records | [OpenCode](packages/ts/memorax-code-backend/test/clients/opencode) | [OpenCode adapter](packages/ts/memorax-code-opencode-adapter/test) |
-| CodeBuddy/WorkBuddy | Correlated native transcript JSONL | [CodeBuddy](packages/ts/memorax-code-backend/test/clients/codebuddy) | [CodeBuddy adapter](packages/ts/memorax-code-codebuddy-adapter/test) |
-| Trae | Validated Turn-ID and Hook pair | [Trae](packages/ts/memorax-code-backend/test/clients/trae) | [Trae adapter](packages/ts/memorax-code-trae-adapter/test) |
+The [native authority map](ARCHITECTURE.md#native-writeback-authority) lists
+each harness's content authority and links to its Backend and adapter suites.
+Every harness also participates in the shared runtime, lifecycle catalog, npm
+source-mapping, test-entry, and local-only trace checks above. This is coverage
+of executable contracts, not a record of real-client E2E results.
 
 These checks catch omitted integration wiring. They do not infer native
 content authority or replace parser, interruption, lifecycle, installed-package,
@@ -135,22 +149,12 @@ or platform verification. Keep new behavior cases in the owning suites.
 
 ## Validation
 
-Choose checks by impact:
-
-| Change | Minimum relevant check |
-| --- | --- |
-| Backend TypeScript | `npm run typecheck --prefix packages/ts/memorax-code-backend` and `npm test --prefix packages/ts/memorax-code-backend` |
-| Codex integration or bundled skill | `npm test --prefix packages/ts/memorax-code-codex-adapter` |
-| Claude Code integration or shared skill | `npm test --prefix packages/ts/memorax-code-claude-adapter` |
-| DeepSeek Harness integration | `npm test --prefix packages/ts/memorax-code-dsh-adapter` |
-| OpenCode integration | `npm test --prefix packages/ts/memorax-code-opencode-adapter` |
-| CodeBuddy/WorkBuddy integration | `npm test --prefix packages/ts/memorax-code-codebuddy-adapter` |
-| Trae integration | `npm test --prefix packages/ts/memorax-code-trae-adapter` |
-| Shared adapter or Hook runtime | All six adapter suites and the affected Backend tests; add `make npm-package-check` for staged runtime or package layout changes |
-| Lifecycle report interpretation | Backend tests and `make npm-package-check` for CLI or lifecycle changes |
-| Public documentation | `make docs-check` |
-| Install, update, uninstall, CLI, or artifact layout | `make npm-package-check` |
-| Broad cross-layer change | `make test` |
+Choose checks by impact from the complete
+[verification profiles](AGENTS.md#5-verification). For architecture changes,
+the [change-routing table](ARCHITECTURE.md#8-test-architecture-and-change-routing)
+maps the affected boundary to its owning tests and named profiles. Documentation
+edits also require the Documentation profile; CLI, lifecycle, and artifact
+changes require the Install/artifacts profile in addition to affected suites.
 
 Real-client or MemoraX-backed checks must be explicit opt-in tests with
 redacted output. Public fixtures must never contain real API keys, private
@@ -166,7 +170,8 @@ A pull request should:
 - call out client, workspace/session scope, HTTP/state, packaging, and
   compatibility impact where relevant;
 - describe security or data-handling changes explicitly; and
-- keep `README.md` and `README.zh.md` synchronized.
+- keep entrypoint summaries and translations consistent with the owning
+  documents.
 
 Reviewers prioritize correctness, safety, compatibility, and executable
 contracts over stylistic preferences. If you discover a vulnerability, follow

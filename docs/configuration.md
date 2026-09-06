@@ -216,6 +216,16 @@ MemoraX Code does not add entries to or otherwise modify `opencode.json` or
 `opencode.jsonc`. Restart or refresh OpenCode after installation or after these
 managed assets change.
 
+The managed loader records the exact MemoraX Code home, OpenCode configuration
+directory, installed Node runtime, and `memorax-code` entrypoint. When the
+enabled plugin loads, it performs a best-effort Backend health check and uses
+those installed package paths to restore an unavailable loopback Backend. A
+prompt waits no more than the plugin instance's single five-second recovery
+budget; if that budget expires, automatic memory handling for that turn is
+skipped while recovery continues in the background. This preserves the
+configured client selection. Remote Backend URLs, invalid connection
+authority, and a removed package command are not recovered automatically.
+
 ## CodeBuddy and WorkBuddy integration paths
 
 The managed CodeBuddy/WorkBuddy marketplace plugin and shared Skill use the
@@ -272,16 +282,6 @@ Trae's automatic-writeback content authority. It does not guess from another
 Turn or maintain a pending queue. The Skill can still perform explicit Repo
 Memory work, but automatic background Repo Memory jobs are unavailable in
 Trae until the client provides a suitable headless worker.
-
-The managed loader records the exact MemoraX Code home, OpenCode configuration
-directory, installed Node runtime, and `memorax-code` entrypoint. When the
-enabled plugin loads, it performs a best-effort Backend health check and uses
-those installed package paths to restore an unavailable loopback Backend. A
-prompt waits no more than the plugin instance's single five-second recovery
-budget; if that budget expires, automatic memory handling for that turn is
-skipped while recovery continues in the background. This preserves the
-configured client selection. Remote Backend URLs, invalid connection
-authority, and a removed package command are not recovered automatically.
 
 ## MemoraX connection
 
@@ -484,7 +484,7 @@ Common operator settings are:
 | Environment | Purpose |
 | --- | --- |
 | `MEMORAX_CODE_HOME` | Select the state and configuration root |
-| `MEMORAX_CODE_AUTO_UPDATE` | Set to `false` to disable client-start background update checks |
+| `MEMORAX_CODE_AUTO_UPDATE` | Set to `false` before starting or restarting the managed Backend to disable its automatic-update scheduler; see [update behavior](#setup-automatic-update-and-package-transition-state) |
 | `MEMORAX_CODE_BACKEND_URL` | Override the Backend URL for one command or Hook |
 | `MEMORAX_CODE_BACKEND_HOST` / `MEMORAX_CODE_BACKEND_PORT` | Select the managed bind; default `127.0.0.1:8787` |
 | `MEMORAX_CODE_BACKEND_TOKEN` | Supply a transient Backend token |
