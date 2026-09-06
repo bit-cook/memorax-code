@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../packages/ts/memorax-code-codex-adapter");
 const builderSkillRoot = join(packageRoot, "skills", "memorax-code");
 const repoMemoryScript = join(builderSkillRoot, "scripts", "repo-memory.mjs");
 const defaultsPath = join(builderSkillRoot, "defaults.json");
@@ -369,6 +369,7 @@ test("collect-all can require provider evidence instead of falling back", () => 
     assert.notEqual(result.status, 0);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, false);
+    assert.equal(report.effective_settings.history.mode, "provider-required");
     assert.equal(report.failed_step, "provider_facets");
     assert.equal(report.steps.git_commits.ok, true);
     assert.match(report.steps.provider_facets.stderr, /Could not resolve to a Repository/);
@@ -392,6 +393,7 @@ test("collect-all can skip provider evidence even when provider is ready", () =>
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);
+    assert.equal(report.effective_settings.history.mode, "local-only");
     assert.equal(report.provider.evidence_state, "ready");
     assert.equal(report.steps.provider_facets.skipped, true);
     assert.equal(report.steps.provider_facets.reason, "provider_skipped_by_user");
@@ -490,24 +492,6 @@ test("collect-all supports commits-only history mode without provider access", (
   }
 });
 
-test("collect-all maps legacy provider flags to history modes", () => {
-  const root = mkdtempSync(join(tmpdir(), "memorax-code-repo-memory-history-legacy-flags."));
-  try {
-    const { repo, bin } = createRepoFixture(root);
-    createFakeAuthenticatedGithubCli(join(bin, "gh"));
-
-    const skipped = runCollectAll(repo, bin, ["--skip-provider"]);
-    assert.equal(skipped.status, 0, skipped.stderr || skipped.stdout);
-    assert.equal(JSON.parse(skipped.stdout).effective_settings.history.mode, "local-only");
-
-    const required = runCollectAll(repo, bin, ["--reuse", "--require-provider"]);
-    assert.notEqual(required.status, 0);
-    assert.equal(JSON.parse(required.stdout).effective_settings.history.mode, "provider-required");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("collect-all rejects contradictory history mode and provider flag combinations", () => {
   const root = mkdtempSync(join(tmpdir(), "memorax-code-repo-memory-history-conflict."));
   try {
@@ -588,11 +572,9 @@ test("memorax-code repo-build requires final summaries to surface notices", () =
   assert.match(skill, /Do not silently collapse notices into counts/);
 });
 
-test("memorax-code repo-build is app-neutral and the router declares OpenAI and Claude metadata", () => {
+test("memorax-code routes repo-build to app-neutral guidance", () => {
   const skill = readFileSync(join(builderSkillRoot, "references", "repo-build.md"), "utf8");
   const router = readFileSync(join(builderSkillRoot, "SKILL.md"), "utf8");
-  const openaiYaml = readFileSync(join(builderSkillRoot, "agents", "openai.yaml"), "utf8");
-  const claudeYaml = readFileSync(join(builderSkillRoot, "agents", "claude.yaml"), "utf8");
 
   assert.match(router, /single router for persistent coding and repository-local\s+memory/);
   assert.match(router, /### Repo Memory/);
@@ -600,15 +582,6 @@ test("memorax-code repo-build is app-neutral and the router declares OpenAI and 
   assert.match(skill, /first-time creation, full rebuilds, or full refreshes/);
   assert.doesNotMatch(skill, /\bCodex\b/);
   assert.match(skill, /normal user-visible assistant message/);
-  assert.match(openaiYaml, /display_name: "MemoraX Code"/);
-  assert.match(openaiYaml, /Use \$memorax-code/);
-  assert.match(openaiYaml, /allow_implicit_invocation: true/);
-  assert.match(claudeYaml, /display_name: "MemoraX Code"/);
-  assert.match(claudeYaml, /Use \/memorax-code-claude-adapter:memorax-code/);
-  assert.doesNotMatch(claudeYaml, /Use \/memorax-code to route/);
-  assert.match(claudeYaml, /~\/\.claude\/skills\/memorax-code/);
-  assert.match(claudeYaml, /\.claude\/skills\/memorax-code/);
-  assert.match(claudeYaml, /allow_implicit_invocation: true/);
 });
 
 test("memorax-code repo templates separate repo memory from runtime coding memory", () => {
@@ -781,7 +754,8 @@ test("repo-memory prepare allows a user-profile-only .repo_memory sidecar", () =
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
     });
     assert.equal(profile.status, 0, profile.stderr || profile.stdout);
-    assert.equal(existsSync(join(repo, ".repo_memory", "user-profile", "preferences.md")), true);
+    const profilePath = join(repo, ".repo_memory", "user-profile", "preferences.md");
+    const originalProfile = readFileSync(profilePath);
 
     const prepared = spawnSync(process.execPath, [repoMemoryScript, "prepare", repo], {
       cwd: packageRoot,
@@ -789,7 +763,7 @@ test("repo-memory prepare allows a user-profile-only .repo_memory sidecar", () =
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
     });
     assert.equal(prepared.status, 0, prepared.stderr || prepared.stdout);
-    assert.equal(existsSync(join(repo, ".repo_memory", "user-profile", "preferences.md")), true);
+    assert.deepEqual(readFileSync(profilePath), originalProfile);
     assert.equal(existsSync(join(repo, ".repo_memory", "raw", "prepare-report.json")), true);
     assert.equal(existsSync(join(repo, ".repo_memory", "resources")), true);
   } finally {

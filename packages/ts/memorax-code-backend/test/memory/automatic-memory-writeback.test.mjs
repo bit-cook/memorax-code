@@ -330,6 +330,76 @@ test("automatic memory writeback retries a retryable provider failure", async ()
   }
 });
 
+for (const { name, status, attempts, buffered } of [
+  { name: "non-retryable failure", status: 400, attempts: 1, buffered: false },
+  { name: "buffered retry exhaustion", status: 503, attempts: 2, buffered: true },
+]) {
+  test(`automatic memory writeback permits the same turn after ${name}`, { timeout: 2000 }, async () => {
+    const requests = [];
+    const outcomes = [];
+    let finishFailure;
+    const failureSettled = new Promise((resolve) => {
+      finishFailure = resolve;
+    });
+    let failRequests = true;
+    const runtime = createAutomaticMemoryWritebackRuntime({
+      diagnosticLogger(message, fields) {
+        if (message !== "memory.automatic_writeback" || typeof fields.accepted !== "boolean") return;
+        outcomes.push(fields);
+        if (!fields.accepted && !fields.retrying) finishFailure();
+      },
+    });
+    const options = {
+      client: "codex",
+      sessionKey: `session-failed-replay-${status}`,
+      userText: "Retry the same completed turn after the failed dispatch settles.",
+      assistantText: "Preserve this turn until MemoraX accepts it.",
+      repositoryScope: REPOSITORY_SCOPE,
+      env: {
+        ...WRITEBACK_ENV,
+        MEMORAX_CODE_MEMORY_WRITEBACK_BUFFER_ENABLED: String(buffered),
+        MEMORAX_CODE_MEMORY_WRITEBACK_BUFFER_MAX_TURNS: "1",
+      },
+      fetchImpl: async (url, init) => {
+        requests.push({ url: String(url), body: JSON.parse(init.body) });
+        return failRequests
+          ? new Response("", { status, headers: { "retry-after": "0" } })
+          : memoraxSuccessResponse("failed-turn-replay");
+      },
+    };
+    try {
+      assert.deepEqual(runtime.enqueue(options), { accepted: true });
+      await failureSettled;
+      assert.equal(requests.length, attempts);
+      assert.deepEqual(outcomes.map(({ accepted, attempt, retrying, httpStatus }) => ({
+        accepted, attempt, retrying, httpStatus,
+      })), Array.from({ length: attempts }, (_, index) => ({
+        accepted: false,
+        attempt: index + 1,
+        retrying: index + 1 < attempts,
+        httpStatus: status,
+      })));
+
+      failRequests = false;
+      assert.deepEqual(runtime.enqueue(options), { accepted: true });
+      await runtime.drain();
+
+      assert.equal(requests.length, attempts + 1, "failed turn reservations must permit a new dispatch");
+      assert.equal(outcomes.length, attempts + 1);
+      assert.equal(outcomes.at(-1).accepted, true);
+      assert.equal(outcomes.at(-1).attempt, 1);
+      assert.equal(outcomes.at(-1).retrying, false);
+      assert.equal(new Set(requests.map(({ body }) => body.metadata.idempotency_key)).size, 1);
+      assert.deepEqual(requests.at(-1).body.messages.map(({ content }) => content), [
+        options.userText,
+        options.assistantText,
+      ]);
+    } finally {
+      runtime.close();
+    }
+  });
+}
+
 test("automatic memory writeback buffers normalized turns until the turn limit", async () => {
   const requests = [];
   const runtime = createAutomaticMemoryWritebackRuntime();
@@ -473,7 +543,7 @@ test("automatic memory writeback deduplicates a successful replay within one run
   }
 });
 
-test("draining an automatic memory runtime flushes buffered turns and waits for provider settlement", async () => {
+test("draining an automatic memory runtime flushes buffered turns and waits for provider settlement", async (t) => {
   const requests = [];
   let notifyFetchStarted;
   let resolveFetch;
@@ -481,6 +551,10 @@ test("draining an automatic memory runtime flushes buffered turns and waits for 
     notifyFetchStarted = resolve;
   });
   const runtime = createAutomaticMemoryWritebackRuntime();
+  t.after(() => {
+    resolveFetch?.(memoraxSuccessResponse("automatic-memory-drain-cleanup"));
+    runtime.close();
+  });
   runtime.enqueue({
     client: "codex",
     sessionKey: "session-runtime-drain",
@@ -520,7 +594,7 @@ test("draining an automatic memory runtime flushes buffered turns and waits for 
   await draining;
   assert.equal(settled, true);
 
-  runtime.enqueue({
+  assert.deepEqual(runtime.enqueue({
     client: "codex",
     sessionKey: "session-runtime-drain-late",
     userText: "Do not accept work after drain begins.",
@@ -528,10 +602,8 @@ test("draining an automatic memory runtime flushes buffered turns and waits for 
     repositoryScope: REPOSITORY_SCOPE,
     env: WRITEBACK_ENV,
     fetchImpl: memoraxFetch(requests),
-  });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  }), { accepted: false, reason: "runtime_closed" });
   assert.equal(requests.length, 1);
-  runtime.close();
 });
 
 test("closing an automatic memory runtime cancels its buffered flush", async () => {

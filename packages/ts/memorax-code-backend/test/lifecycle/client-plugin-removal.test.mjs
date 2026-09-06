@@ -11,6 +11,16 @@ test("package-removal cleanup is prepared before shutdown and removes all client
   const home = join(root, "home");
   const memoraxCodeHome = join(home, "memorax-code-home");
   const codexHome = join(home, "codex-home");
+  const codexConfigPath = join(codexHome, "config.toml");
+  const codexStatePath = join(memoraxCodeHome, "adapters", "codex", "state.json");
+  const codexConfig = "codex config sentinel\n";
+  const codexState = `${JSON.stringify({
+    version: 1,
+    runtime: "codex",
+    integration: "hooks",
+    enabled: true,
+    codexHome,
+  }, null, 2)}\n`;
   const claudeHome = join(home, "claude-home");
   const openCodeConfigDir = join(home, "opencode-config");
   const codexPluginManifest = join(
@@ -47,10 +57,8 @@ test("package-removal cleanup is prepared before shutdown and removes all client
     await mkdir(dirname(dshProfilePath), { recursive: true });
     await mkdir(dshAdapterRoot, { recursive: true });
     await writeFile(codexPluginManifest, '{"name":"memorax-code-codex-adapter"}\n');
-    await writeFile(join(memoraxCodeHome, "adapters", "codex", "state.json"), `${JSON.stringify({
-      version: 1,
-      codexHome,
-    })}\n`);
+    await writeFile(codexConfigPath, codexConfig);
+    await writeFile(codexStatePath, codexState);
     await writeFile(join(memoraxCodeHome, "adapters", "claude-code", "state.json"), `${JSON.stringify({
       version: 1,
       claudeHome,
@@ -140,6 +148,9 @@ writeFileSync(path, JSON.stringify(manifest, null, 2) + "\\n");
 
     assert.equal(report.ok, true);
     assert.equal(report.codexPlugin?.ok, true);
+    assert.equal(report.codexPlugin.codexPlugin.ok, true);
+    assert.equal(await readFile(codexConfigPath, "utf8"), codexConfig);
+    assert.equal(await readFile(codexStatePath, "utf8"), codexState);
     assert.equal(report.claudePlugin?.ok, true);
     assert.equal(report.dshPlugin?.ok, true);
     assert.equal(report.opencodePlugin?.ok, true);

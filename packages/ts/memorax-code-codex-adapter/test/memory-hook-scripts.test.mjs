@@ -152,35 +152,35 @@ test("combined UserPromptSubmit hook skips pathless Codex background turns but w
   }
 });
 
-test("memory writeback hook posts assistant message to Backend", async () => {
-  const { server, url, requests } = await listenRecorder();
-  const memoraxCodeHome = await mkdtemp(join(tmpdir(), "memorax-code-codex-writeback-hook-"));
+test("memory writeback hook preserves projectless content using the persisted Backend connection and token", async () => {
+  const { server, url, requests, requestHeaders } = await listenRecorder();
+  const memoraxCodeHome = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-connection-"));
   const userHome = join(memoraxCodeHome, "user-home");
   const managedCwd = join(userHome, "Documents", "Codex", "2026-07-29", "new-chat");
   await mkdir(managedCwd, { recursive: true });
   try {
+    await writeBackendConnection(memoraxCodeHome, url, "persisted-backend-token");
     const env = {
       HOME: userHome,
-      MEMORAX_CODE_BACKEND_URL: url,
+      MEMORAX_CODE_BACKEND_URL: "",
+      MEMORAX_CODE_BACKEND_TOKEN: "",
       MEMORAX_CODE_CODEX_MEMORY_HOOK_TIMEOUT_MS: "1000",
       MEMORAX_CODE_HOME: memoraxCodeHome,
       USERPROFILE: userHome,
     };
     const pinned = await runHook(userPromptHook, env, {
       hook_event_name: "UserPromptSubmit",
-      session_id: "session-1",
-      turn_id: "turn-1",
+      session_id: "session-persisted-connection",
+      turn_id: "turn-persisted-connection",
       prompt: "Pin this turn.",
       cwd: managedCwd,
     });
     assert.equal(pinned.code, 0, pinned.stderr);
-    const result = await runHook(writebackHook, {
-      ...env,
-    }, {
+    const result = await runHook(writebackHook, env, {
       hook_event_name: "Stop",
-      session_id: "session-1",
-      turn_id: "turn-1",
-      last_assistant_message: "Assistant answer.",
+      session_id: "session-persisted-connection",
+      turn_id: "turn-persisted-connection",
+      last_assistant_message: "Persist this answer.",
       cwd: managedCwd,
       transcript_path: "/tmp/transcript.jsonl",
     });
@@ -193,50 +193,13 @@ test("memory writeback hook posts assistant message to Backend", async () => {
     assert.deepEqual(requests[0].body, {
       version: 1,
       client: "codex",
-      sessionId: "session-1",
-      turnId: "turn-1",
-      lastAssistantMessage: "Assistant answer.",
+      sessionId: "session-persisted-connection",
+      turnId: "turn-persisted-connection",
+      lastAssistantMessage: "Persist this answer.",
       cwd: managedCwd,
       workspaceKind: "projectless",
       transcriptPath: "/tmp/transcript.jsonl",
     });
-  } finally {
-    server.close();
-    await rm(memoraxCodeHome, { recursive: true, force: true });
-  }
-});
-
-test("memory writeback hook reads the persisted Backend connection and token", async () => {
-  const { server, url, requests, requestHeaders } = await listenRecorder();
-  const memoraxCodeHome = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-connection-"));
-  try {
-    await writeBackendConnection(memoraxCodeHome, url, "persisted-backend-token");
-    const env = {
-      MEMORAX_CODE_BACKEND_URL: "",
-      MEMORAX_CODE_BACKEND_TOKEN: "",
-      MEMORAX_CODE_CODEX_MEMORY_HOOK_TIMEOUT_MS: "1000",
-      MEMORAX_CODE_HOME: memoraxCodeHome,
-    };
-    const pinned = await runHook(userPromptHook, env, {
-      hook_event_name: "UserPromptSubmit",
-      session_id: "session-persisted-connection",
-      turn_id: "turn-persisted-connection",
-      prompt: "Pin this turn.",
-      cwd: "/repo",
-    });
-    assert.equal(pinned.code, 0, pinned.stderr);
-    const result = await runHook(writebackHook, env, {
-      hook_event_name: "Stop",
-      session_id: "session-persisted-connection",
-      turn_id: "turn-persisted-connection",
-      last_assistant_message: "Persist this answer.",
-      cwd: "/repo",
-      transcript_path: "/tmp/transcript.jsonl",
-    });
-
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].path, "/memory/writeback");
     assert.equal(requestHeaders[0]["x-memorax-code-backend-token"], "persisted-backend-token");
   } finally {
     server.close();

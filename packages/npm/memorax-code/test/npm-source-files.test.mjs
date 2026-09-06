@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -23,6 +23,7 @@ test("npm source staging copies tracked files only", async () => {
     await copyDeclaredNpmSourceTree({ repoRoot: root, source, destination, declaredFiles });
 
     assert.equal((await stat(join(destination, "SKILL.md"))).isFile(), true);
+    assert.equal(await readFile(join(destination, "SKILL.md"), "utf8"), "tracked\n");
     assert.equal(
       await stat(join(destination, "temporary-untracked.md")).catch(() => undefined),
       undefined,

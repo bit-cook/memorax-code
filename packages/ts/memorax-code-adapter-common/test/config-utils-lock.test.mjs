@@ -20,15 +20,15 @@ import test from "node:test";
 import {
   withJsonFileLock,
   withJsonFileLockAsync,
-} from "../../memorax-code-adapter-common/src/config-utils.mjs";
+} from "../src/config-utils.mjs";
 
 const configUtilsSourceUrl = new URL(
-  "../../memorax-code-adapter-common/src/config-utils.mjs",
+  "../src/config-utils.mjs",
   import.meta.url,
 );
 const configUtilsUrl = configUtilsSourceUrl.href;
 const configUtilsDeclarationUrl = new URL(
-  "../../memorax-code-adapter-common/src/config-utils.d.mts",
+  "../src/config-utils.d.mts",
   import.meta.url,
 );
 

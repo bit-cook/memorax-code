@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { scheduleMissingRepoMemoryBuild } from "../../memorax-code-adapter-common/src/repo-memory/repo-memory-auto-build.mjs";
+import { scheduleMissingRepoMemoryBuild } from "../src/repo-memory/repo-memory-auto-build.mjs";
 
 test("Repo Memory auto-build schedules maintain only when PROFILE.md is missing", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-repo-auto-build-"));

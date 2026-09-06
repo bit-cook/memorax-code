@@ -5,10 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildRepoUserProfilePreferencesContext } from "../../memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs";
+import { buildRepoUserProfilePreferencesContext } from "../../packages/ts/memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs";
 
-const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const repoRoot = resolve(packageRoot, "../../..");
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../packages/ts/memorax-code-codex-adapter");
 const skillRoot = join(packageRoot, "skills", "memorax-code");
 const scriptPath = join(skillRoot, "scripts", "user-profile-memory.mjs");
 
@@ -67,55 +66,21 @@ function runProfileAsync(command, repo, args = []) {
 }
 
 test("repo memory skills route user-profile reads and writes", () => {
-  const skill = readSkillFile("SKILL.md");
   const reference = readSkillFile("references/personal-write.md");
   const readReference = readSkillFile("references/personal-read.md");
-  const openaiYaml = readSkillFile("agents/openai.yaml");
 
-  assert.match(skill, /name: memorax-code/);
-  assert.match(skill, /durable profile or interaction preferences/);
-  assert.match(skill, /personal profile write/);
   assert.match(reference, /\.repo_memory\/user-profile\/preferences\.md/);
+  assert.match(reference, /Require the user to explicitly ask/);
   assert.match(reference, /may be saved implicitly/);
-  assert.match(reference, /Keep file names, schema and script field names, type values, command options, and fixed Markdown headings in English/);
-  assert.match(reference, /Write human-readable memory content in the user's current interaction language/);
-  assert.match(reference, /procedure titles and steps and user-profile descriptions, applicability, and exceptions/);
-  assert.match(reference, /Preserve exact code identifiers, commands, paths, API names, and quoted literals without translation/);
-  assert.match(reference, /Handle the semantic match before writing/);
-  assert.match(reference, /New preference: add a new preference/);
-  assert.match(reference, /Equivalent content: do not add a duplicate/);
-  assert.match(reference, /Addition or refinement to the same preference: update the existing preference/);
-  assert.match(reference, /directly conflicts with or replaces an old preference in the same scope: update the existing id and remove the superseded content/);
-  assert.match(reference, /explicitly says a preference no longer applies: delete that preference/);
-  assert.match(reference, /environment, tool, or workflow no longer exists: update the scope; delete it if the entire preference is obsolete/);
   assert.match(reference, /Do not modify or delete existing preferences because of a one-time instruction/);
   assert.match(reference, /Do not scan or clean up unrelated preferences/);
   assert.match(reference, /multiple preferences may match, or it is unclear whether the change is durable, ask the user/);
   assert.match(reference, /never use `workflow` or `environment` to store an executable repository procedure/);
   assert.match(reference, /node <skill-dir>\/scripts\/user-profile-memory\.mjs/);
   assert.match(reference, /Do not preserve deleted text elsewhere/);
-  assert.match(openaiYaml, /display_name: "MemoraX Code"/);
-  assert.match(openaiYaml, /default_prompt: "Use \$memorax-code/);
-  assert.match(openaiYaml, /allow_implicit_invocation: true/);
 
   assert.match(readReference, /user-profile-memory\.mjs list --repo <repo>/);
-  assert.match(readReference, /list operation does not create it/);
   assert.match(readReference, /Do not write, normalize, migrate, repair, or delete memory/);
-});
-
-test("root READMEs document personal-memory replacement and deletion", () => {
-  const english = readFileSync(join(repoRoot, "README.md"), "utf8");
-  const chinese = readFileSync(join(repoRoot, "README.zh.md"), "utf8");
-
-  assert.match(english, /Personal Memory and Procedure Memory stay in the current repository under\s+`\.repo_memory\/`/);
-  assert.match(english, /removes the superseded\s+wording/);
-  assert.match(english, /deletes only the named preference,\s+procedure topic, section, or step/);
-  assert.match(english, /One-time task instructions do not change saved memory/);
-
-  assert.match(chinese, /Personal Memory 和 Procedure Memory 保存在当前仓库的 `\.repo_memory\/` 下/);
-  assert.match(chinese, /彻底移除被替代的文字/);
-  assert.match(chinese, /只删除点名的偏好、流程主题、段落或步骤/);
-  assert.match(chinese, /一次性任务指令不会改写已保存的记忆/);
 });
 
 test("repo-user-profile-memory script performs add duplicate update delete with counts", () => {
@@ -178,6 +143,7 @@ test("repo-user-profile-memory script performs add duplicate update delete with 
     assert.equal(updated.status, "updated");
     assert.equal(updated.id, added.id);
     assert.equal(updated.active_count, 1);
+    assert.equal(updated.total_count, 1);
     text = readFileSync(preferences, "utf8");
     assert.match(text, /active_count: 1/);
     assert.match(text, /total_count: 1/);
@@ -189,8 +155,11 @@ test("repo-user-profile-memory script performs add duplicate update delete with 
 
     const listed = runProfile("list", repo);
     assert.equal(listed.active_count, 1);
+    assert.equal(listed.total_count, 1);
     assert.equal(listed.preferences[0].id, added.id);
     assert.equal(listed.preferences[0].description, updatedDescription);
+    assert.equal(listed.preferences[0].applies_when, "Planning, review, and implementation discussions.");
+    assert.equal(listed.preferences[0].do_not_apply_when, "User asks for English.");
 
     const deleted = runProfile("delete", repo, ["--id", added.id]);
     assert.equal(deleted.status, "deleted");
@@ -200,6 +169,7 @@ test("repo-user-profile-memory script performs add duplicate update delete with 
     assert.match(text, /total_count: 0/);
     assert.doesNotMatch(text, /User prefers detailed Chinese answers/);
     assert.doesNotMatch(text, new RegExp(added.id));
+    assert.doesNotMatch(text, /- Status: `(deleted|superseded)`/);
     assert.equal(existsSync(events), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -246,33 +216,70 @@ test("repo-user-profile-memory script keeps multiple entries isolated during upd
     assert.equal(workflow.active_count, 2);
     assert.equal(readFileSync(join(repo, ".gitignore"), "utf8"), "node_modules\n.repo_memory/\n");
 
+    const duplicate = runProfile("add", repo, [
+      "--type", "workflow",
+      "--description", "User prefers focused tests before broad validation.",
+      "--applies-when", "Choosing validation commands.",
+    ]);
+    assert.equal(duplicate.status, "duplicate");
+    assert.equal(duplicate.id, workflow.id);
+    assert.equal(duplicate.active_count, 2);
+    assert.equal(duplicate.total_count, 2);
+
     const listed = runProfile("list", repo);
     assert.equal(listed.active_count, 2);
     assert.deepEqual(new Set(listed.preferences.map((pref) => pref.id)), new Set([communication.id, workflow.id]));
+    const selected = listed.preferences.find((preference) => preference.id === workflow.id);
+    assert.equal(selected?.description, "User prefers focused tests before broad validation.");
 
     const updated = runProfile("update", repo, [
-      "--id", workflow.id,
+      "--id", selected.id,
       "--description", "User prefers running focused tests first, then broader validation if the change crosses layers.",
       "--do-not-apply-when", "The user explicitly asks for full validation only.",
     ]);
+    assert.equal(updated.id, workflow.id);
     assert.equal(updated.active_count, 2);
     let text = readFileSync(preferences, "utf8");
     assert.match(text, /active_count: 2/);
+    assert.match(text, /total_count: 2/);
+    assert.equal((text.match(/^## Preference /gm) ?? []).length, 2);
     assert.match(text, /User prefers Chinese answers in this repository\./);
     assert.match(text, /focused tests first, then broader validation/);
+    assert.doesNotMatch(text, /User prefers focused tests before broad validation\./);
+    assert.match(text, /Choosing validation commands after code changes\./);
     assert.match(text, /The user explicitly asks for full validation only\./);
 
-    const deleted = runProfile("delete", repo, ["--id", communication.id]);
+    const replaced = runProfile("update", repo, [
+      "--id", workflow.id,
+      "--description", "用户偏好：跨层改动后直接运行完整验证。",
+    ]);
+    assert.equal(replaced.id, workflow.id);
+    assert.equal(replaced.active_count, 2);
+    assert.equal(replaced.total_count, 2);
+    text = readFileSync(preferences, "utf8");
+    assert.equal((text.match(/^## Preference /gm) ?? []).length, 2);
+    assert.match(text, /用户偏好：跨层改动后直接运行完整验证。/);
+    assert.doesNotMatch(text, /focused tests first, then broader validation/);
+    assert.doesNotMatch(text, /User prefers focused tests before broad validation\./);
+    assert.match(text, /Choosing validation commands after code changes\./);
+    assert.match(text, /The user explicitly asks for full validation only\./);
+    assert.match(text, /User prefers Chinese answers in this repository\./);
+    assert.doesNotMatch(text, /- Status: `(deleted|superseded)`/);
+
+    const deleted = runProfile("delete", repo, ["--id", workflow.id]);
+    assert.equal(deleted.status, "deleted");
     assert.equal(deleted.active_count, 1);
     text = readFileSync(preferences, "utf8");
     assert.match(text, /active_count: 1/);
     assert.match(text, /total_count: 1/);
-    assert.doesNotMatch(text, /Chinese answers/);
-    assert.doesNotMatch(text, new RegExp(communication.id));
-    assert.match(text, new RegExp(workflow.id));
-    assert.match(text, /focused tests first, then broader validation/);
+    assert.match(text, new RegExp(communication.id));
+    assert.match(text, /User prefers Chinese answers in this repository\./);
+    assert.doesNotMatch(text, new RegExp(workflow.id));
+    assert.doesNotMatch(text, /用户偏好：跨层改动后直接运行完整验证。/);
+    assert.doesNotMatch(text, /focused tests first, then broader validation/);
+    assert.doesNotMatch(text, /- Status: `(deleted|superseded)`/);
 
-    const missingDelete = runProfileRaw("delete", repo, ["--id", communication.id]);
+    const missingDelete = runProfileRaw("delete", repo, ["--id", workflow.id]);
     assert.notEqual(missingDelete.status, 0);
     assert.match(missingDelete.stderr, /Preference id not found/);
 
@@ -398,91 +405,6 @@ test("repo-user-profile-memory script rejects oversized writes without changing 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
-
-test("documented user-profile lifecycle updates the selected id and physically removes obsolete content", () => {
-  const root = mkdtempSync(join(tmpdir(), "memorax-code-user-profile-semantic."));
-  try {
-    const repo = createRepo(root);
-    const preferences = join(repo, ".repo_memory", "user-profile", "preferences.md");
-
-    const first = runProfile("add", repo, [
-      "--type", "communication",
-      "--description", "用户偏好：我喜欢用中文回答。",
-      "--applies-when", "回答当前 repo 的问题。",
-      "--do-not-apply-when", "用户明确要求其他语言。",
-    ]);
-    const unrelated = runProfile("add", repo, [
-      "--type", "profile",
-      "--description", "用户希望在这个 repo 中被称为 Alex。",
-      "--applies-when", "在这个 repo 中称呼用户。",
-    ]);
-    const duplicate = runProfile("add", repo, [
-      "--type", "communication",
-      "--description", "用户偏好：我喜欢用中文回答。",
-      "--applies-when", "回答当前 repo 的问题。",
-    ]);
-    assert.equal(duplicate.status, "duplicate");
-    assert.equal(duplicate.id, first.id);
-    assert.equal(duplicate.active_count, 2);
-
-    const candidates = runProfile("list", repo);
-    assert.equal(candidates.active_count, 2);
-    const selected = candidates.preferences.find((preference) => preference.id === first.id);
-    assert.equal(selected?.description, "用户偏好：我喜欢用中文回答。");
-
-    const refined = runProfile("update", repo, [
-      "--id", selected.id,
-      "--description", "用户偏好：在这个 repo 里希望我用中文回答，除非明确要求其他语言。",
-      "--applies-when", "回答当前 repo 的设计、实现、review 或调试问题。",
-      "--do-not-apply-when", "用户明确要求英文或其他语言。",
-    ]);
-    assert.equal(refined.id, first.id);
-    assert.equal(refined.active_count, 2);
-
-    let text = readFileSync(preferences, "utf8");
-    assert.equal((text.match(/^## Preference /gm) ?? []).length, 2);
-    assert.match(text, /active_count: 2/);
-    assert.match(text, /在这个 repo 里希望我用中文回答/);
-    assert.doesNotMatch(text, /我喜欢用中文回答/);
-    assert.match(text, /被称为 Alex/);
-
-    const replaced = runProfile("update", repo, [
-      "--id", first.id,
-      "--description", "用户偏好：在这个 repo 里默认使用英文回答。",
-      "--applies-when", "回答当前 repo 的问题。",
-      "--do-not-apply-when", "用户明确要求其他语言。",
-    ]);
-    assert.equal(replaced.id, first.id);
-    assert.equal(replaced.active_count, 2);
-
-    text = readFileSync(preferences, "utf8");
-    assert.match(text, /默认使用英文回答/);
-    assert.doesNotMatch(text, /在这个 repo 里希望我用中文回答/);
-    assert.match(text, /被称为 Alex/);
-
-    const deleted = runProfile("delete", repo, ["--id", first.id]);
-    assert.equal(deleted.status, "deleted");
-    assert.equal(deleted.active_count, 1);
-
-    text = readFileSync(preferences, "utf8");
-    assert.match(text, /active_count: 1/);
-    assert.match(text, new RegExp(unrelated.id));
-    assert.match(text, /被称为 Alex/);
-    assert.doesNotMatch(text, new RegExp(first.id));
-    assert.doesNotMatch(text, /默认使用英文回答/);
-    assert.doesNotMatch(text, /- Status: `(deleted|superseded)`/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("repo memory user-profile skill files exist", () => {
-  assert.equal(existsSync(join(skillRoot, "SKILL.md")), true);
-  assert.equal(existsSync(join(skillRoot, "agents", "openai.yaml")), true);
-  assert.equal(existsSync(scriptPath), true);
-  assert.equal(existsSync(join(skillRoot, "references", "personal-read.md")), true);
-  assert.equal(existsSync(join(skillRoot, "references", "personal-write.md")), true);
 });
 
 test("the Node profile writer preserves read-only listing and feeds the existing context reader", () => {

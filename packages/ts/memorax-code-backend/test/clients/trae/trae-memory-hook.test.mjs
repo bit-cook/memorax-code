@@ -5,70 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createTraeMemoryHookRuntime } from "../../../dist/clients/trae/memory-hook-runtime.js";
-import {
-  parseSkillReminderCommand,
-  parseTurnStartCommand,
-  parseWritebackCommand,
-} from "../../../dist/memory/hook-command.js";
 import { createRepositoryMemorySessionRuntime } from "../../../dist/memory/repository-session.js";
 import { traeTracePaths } from "../../../dist/trace/config.js";
-
-test("Trae Hook commands keep a closed content-authority schema", () => {
-  const sessionId = "trae-schema-session";
-  const prompt = "  Keep the exact Trae prompt.  ";
-  const turnId = traeTurnId(sessionId, prompt);
-  const start = {
-    version: 1,
-    client: "trae",
-    sessionId,
-    turnId,
-    prompt,
-    cwd: "/workspace/trae",
-    workspaceKind: "project",
-  };
-  const writeback = {
-    version: 1,
-    client: "trae",
-    sessionId,
-    turnId,
-    prompt,
-    lastAssistantMessage: "  Keep the exact Trae answer.  ",
-    cwd: "/workspace/trae",
-    workspaceKind: "project",
-  };
-
-  assert.deepEqual(parseTurnStartCommand(start), { ok: true, command: start });
-  assert.deepEqual(parseWritebackCommand(writeback), { ok: true, command: writeback });
-  assert.equal(parseSkillReminderCommand({
-    version: 1,
-    client: "trae",
-    sessionId,
-    turnId,
-    cwd: "/workspace/trae",
-    content: "Use the memorax-code skill when prior work may help.",
-    triggers: ["cadence"],
-  }).ok, true);
-
-  for (const [name, parser, command] of [
-    ["foreign transcript authority", parseTurnStartCommand, { ...start, transcriptPath: "/tmp/session.jsonl" }],
-    ["cross-session turn id", parseTurnStartCommand, { ...start, turnId: traeTurnId("other-session", prompt) }],
-    ["prompt-mismatched turn id", parseTurnStartCommand, { ...start, prompt: "Different prompt." }],
-    ["non-canonical timestamp", parseTurnStartCommand, { ...start, turnId: `${sessionId}:01:${"a".repeat(64)}` }],
-    ["missing assistant authority", parseWritebackCommand, { ...writeback, lastAssistantMessage: " " }],
-    ["foreign message collection", parseWritebackCommand, { ...writeback, messages: [] }],
-    ["foreign reminder transcript", parseSkillReminderCommand, {
-      version: 1,
-      client: "trae",
-      sessionId,
-      turnId,
-      content: "Do not accept foreign authority.",
-      triggers: ["cadence"],
-      transcriptPath: "/tmp/session.jsonl",
-    }],
-  ]) {
-    assert.equal(parser(command).ok, false, name);
-  }
-});
 
 test("Trae runtime writes exact Hook content once for a repeated completed Turn", async () => {
   const fixture = await createFixture("exact-writeback");

@@ -5,7 +5,7 @@ import {
   evaluateRepoMemoryUpdatePolicy,
   parseRepoMemoryUpdatePolicyConfig,
   resolveRepoMemoryUpdatePolicy,
-} from "../../memorax-code-adapter-common/src/repo-memory/repo-memory-update-policy.mjs";
+} from "../src/repo-memory/repo-memory-update-policy.mjs";
 
 test("repo memory update policy defaults to five commits or 24 hours", () => {
   assert.deepEqual(resolveRepoMemoryUpdatePolicy(), {

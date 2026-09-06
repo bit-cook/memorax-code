@@ -45,23 +45,12 @@ test("managed clients use persisted config", () => {
   });
 });
 
-test("--clients overrides persisted config", () => {
-  assert.deepEqual(resolveManagedClients([
-    "--clients", "claude",
-  ], { clients: { codex: true, claude: false } }), {
-    codex: false,
-    claude: true,
-    dsh: false,
-    opencode: false,
-  });
-});
-
-test("--clients accepts exact client sets", () => {
+test("--clients accepts exact client sets and overrides persisted configuration", () => {
   for (const client of ["codex", "claude", "dsh", "opencode", "codebuddy", "trae"]) {
     const expected = { codex: false, claude: false, dsh: false, opencode: false, [client]: true };
     assert.deepEqual(parseManagedClients(client), expected);
     assert.deepEqual(parseManagedClients(` ${client.toUpperCase()}, ${client} `), expected);
-    assert.deepEqual(resolveManagedClients(["--clients", client], { clients: { codex: true, claude: true, dsh: true, opencode: true, codebuddy: true, trae: true } }), expected);
+    assert.deepEqual(resolveManagedClients(["--clients", client], { clients: { codex: true, claude: true, dsh: true, opencode: true, codebuddy: true, trae: true, [client]: false } }), expected);
   }
   assert.deepEqual(parseManagedClients("codex,dsh,opencode"), { codex: true, claude: false, dsh: true, opencode: true });
   assert.deepEqual(parseManagedClients("codex,claude,dsh,opencode,trae"), { codex: true, claude: true, dsh: true, opencode: true, trae: true });
