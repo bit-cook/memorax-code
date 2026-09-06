@@ -130,7 +130,10 @@ export function createTraeMemoryHookRuntime(
         traceContext,
       });
       await recordMaterializedTurn(traceContext, command, options);
-      if (activeTurn?.clientTurnId === command.turnId) activeTurns.delete(command.sessionId);
+      if (
+        activeTurn?.clientTurnId === command.turnId
+        && activeTurns.get(command.sessionId) === activeTurn
+      ) activeTurns.delete(command.sessionId);
       options.diagnosticLogger?.("trae_memory.writeback", {
         scheduled: completed.scheduled,
         ...(!completed.scheduled ? { reason: completed.reason } : {}),
