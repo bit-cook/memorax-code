@@ -118,6 +118,8 @@ function selectCodeBuddyTurnBranch(
   if (!records) return { ok: false, reason: "malformed_transcript" };
   const session = records.filter((record) => stringField(record, "sessionId") === input.sessionId);
   const users = session.filter((record) => record.role === "user" && visibleUserPrompt(record));
+  // The pre-submit byte boundary excludes earlier identical prompts; the digest
+  // locates the native user record. Writeback content still comes from the transcript.
   const candidates = users.filter((record) => {
     const prompt = visibleUserPrompt(record);
     return Boolean(
@@ -210,7 +212,8 @@ function contentText(value: unknown): string | undefined {
 function belongsTo(record: CodeBuddyHistoryRecord, userId: string, records: readonly CodeBuddyHistoryRecord[]): boolean {
   let current: CodeBuddyHistoryRecord | undefined = record;
   const seen = new Set<string>();
-  for (let depth = 0; current && depth < 100; depth += 1) {
+  // Detect cycles without truncating valid long tool chains.
+  while (current) {
     const id = stringField(current, "id");
     if (id && seen.has(id)) return false;
     if (id) seen.add(id);

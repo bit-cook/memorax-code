@@ -49,6 +49,8 @@ export async function enableCodeBuddyAdapter(options = {}) {
   const memoraxCodeHome = options.memoraxCodeHome ?? defaultMemoraxCodeHome();
   const installPath = options.installPath ?? codeBuddyInstallPath(home);
   const localPluginPath = marketplacePluginPath(home);
+  // Installation alone cannot prove native Hook execution; require a fresh
+  // runtime observation instead of carrying one over from the previous install.
   await rm(codeBuddyRuntimeObservationPath(memoraxCodeHome), { force: true });
   await mkdir(dirname(installPath), { recursive: true });
   await rm(installPath, { recursive: true, force: true });
