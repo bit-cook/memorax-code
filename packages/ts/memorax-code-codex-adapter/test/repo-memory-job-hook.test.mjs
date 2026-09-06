@@ -579,7 +579,7 @@ test("repo memory job supervisor records a missing Codex executable as failed", 
   const state = waitForTerminal(payload.jobPath);
   assert.equal(state.status, "failed");
   assert.equal(state.failureReason, "codex_spawn_failed");
-  assert.equal(existsSync(markerPathForRepo(memoraxCodeHome, realpathSync(repo)).markerPath), false);
+  waitForMarkerAbsent(memoraxCodeHome, repo);
 });
 
 test("repo memory job launcher treats fresh empty startup lockdir as initializing", () => {
@@ -718,7 +718,7 @@ test("repo memory job supervisor fails when generated artifacts do not validate"
   const state = waitForTerminal(payload.jobPath);
   assert.equal(state.status, "failed");
   assert.equal(state.failureReason, "artifact_validation_failed");
-  assert.equal(existsSync(markerPathForRepo(memoraxCodeHome, realpathSync(repo)).markerPath), false);
+  waitForMarkerAbsent(memoraxCodeHome, repo);
 });
 
 test("repo memory job supervisor rejects a repository HEAD change during build", () => {
@@ -738,7 +738,7 @@ test("repo memory job supervisor rejects a repository HEAD change during build",
   assert.equal(state.failureReason, "snapshot_changed");
   assert.equal(state.expectedHead, launchHead);
   assert.notEqual(state.actualHead, launchHead);
-  assert.equal(existsSync(markerPathForRepo(memoraxCodeHome, realpathSync(repo)).markerPath), false);
+  waitForMarkerAbsent(memoraxCodeHome, repo);
 });
 
 test("repo memory job supervisor records an unexpected validation exception", () => {
@@ -757,7 +757,7 @@ test("repo memory job supervisor records an unexpected validation exception", ()
   assert.equal(state.status, "failed");
   assert.equal(state.failureReason, "worker_internal_error");
   assert.match(state.error, /git could not resolve HEAD/);
-  assert.equal(existsSync(markerPathForRepo(memoraxCodeHome, realpathSync(repo)).markerPath), false);
+  waitForMarkerAbsent(memoraxCodeHome, repo);
 });
 
 test("repo memory update fails before launch without an existing profile", () => {

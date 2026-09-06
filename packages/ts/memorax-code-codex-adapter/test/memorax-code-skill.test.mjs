@@ -234,7 +234,7 @@ test("memorax-code declares OpenAI and Claude implicit invocation metadata", () 
 
   assert.match(openaiYaml, /display_name: "MemoraX Code"/);
   assert.match(openaiYaml, /Route coding, repo, and personal memory/);
-  assert.match(openaiYaml, /Use \$memorax-code to route/);
+  assert.match(openaiYaml, /default_prompt: "Use \$memorax-code to route/);
   assert.match(openaiYaml, /allow_implicit_invocation: true/);
 
   assert.match(claudeYaml, /display_name: "MemoraX Code"/);

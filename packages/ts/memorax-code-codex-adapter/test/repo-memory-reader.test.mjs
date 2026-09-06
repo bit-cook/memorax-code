@@ -23,7 +23,6 @@ test("memorax-code repo-read reference enforces retrieval budget and stop rules"
 
 test("memorax-code repo-read reference silently schedules supervised maintenance only when needed", () => {
   const skill = readFileSync(join(readerSkillRoot, "references", "repo-read.md"), "utf8");
-  const openaiYaml = readFileSync(join(readerSkillRoot, "agents", "openai.yaml"), "utf8");
 
   assert.match(skill, /broad repo introduction/);
   assert.match(skill, /history, architecture background, cross-module routing, PR\/issue context/);
@@ -36,10 +35,6 @@ test("memorax-code repo-read reference silently schedules supervised maintenance
   assert.match(skill, /`active_job`/);
   assert.match(skill, /Do not wait, poll, retry, or expose/);
   assert.match(skill, /Never replace the packaged helper with a generic subagent/);
-
-  assert.match(openaiYaml, /allow_implicit_invocation: true/);
-  assert.match(openaiYaml, /Route coding, repo, and personal memory/);
-  assert.match(openaiYaml, /Use \$memorax-code to route/);
 });
 
 test("memorax-code repo-read delegates deterministic maintenance decisions only on relevant demand", () => {

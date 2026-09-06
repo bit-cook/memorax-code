@@ -588,11 +588,9 @@ test("memorax-code repo-build requires final summaries to surface notices", () =
   assert.match(skill, /Do not silently collapse notices into counts/);
 });
 
-test("memorax-code repo-build is app-neutral and the router declares OpenAI and Claude metadata", () => {
+test("memorax-code routes repo-build to app-neutral guidance", () => {
   const skill = readFileSync(join(builderSkillRoot, "references", "repo-build.md"), "utf8");
   const router = readFileSync(join(builderSkillRoot, "SKILL.md"), "utf8");
-  const openaiYaml = readFileSync(join(builderSkillRoot, "agents", "openai.yaml"), "utf8");
-  const claudeYaml = readFileSync(join(builderSkillRoot, "agents", "claude.yaml"), "utf8");
 
   assert.match(router, /single router for persistent coding and repository-local\s+memory/);
   assert.match(router, /### Repo Memory/);
@@ -600,15 +598,6 @@ test("memorax-code repo-build is app-neutral and the router declares OpenAI and 
   assert.match(skill, /first-time creation, full rebuilds, or full refreshes/);
   assert.doesNotMatch(skill, /\bCodex\b/);
   assert.match(skill, /normal user-visible assistant message/);
-  assert.match(openaiYaml, /display_name: "MemoraX Code"/);
-  assert.match(openaiYaml, /Use \$memorax-code/);
-  assert.match(openaiYaml, /allow_implicit_invocation: true/);
-  assert.match(claudeYaml, /display_name: "MemoraX Code"/);
-  assert.match(claudeYaml, /Use \/memorax-code-claude-adapter:memorax-code/);
-  assert.doesNotMatch(claudeYaml, /Use \/memorax-code to route/);
-  assert.match(claudeYaml, /~\/\.claude\/skills\/memorax-code/);
-  assert.match(claudeYaml, /\.claude\/skills\/memorax-code/);
-  assert.match(claudeYaml, /allow_implicit_invocation: true/);
 });
 
 test("memorax-code repo templates separate repo memory from runtime coding memory", () => {
