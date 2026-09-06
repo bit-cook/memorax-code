@@ -135,6 +135,7 @@ for relative in [
     "lib/trial-setup.mjs",
     "lib/windows-cli-invocation.mjs",
     "lib/windows-user-path.mjs",
+    "lib/memorax-code-adapter-common/src/backend-command.mjs",
     "lib/memorax-code-adapter-common/src/backend-connection.mjs",
     "lib/memorax-code-adapter-common/src/config-utils.mjs",
     "lib/memorax-code-adapter-common/src/hooks/client-hook-launcher.mjs",
@@ -191,6 +192,7 @@ for relative in [
     "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/runtime-shell.json",
     "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/repo-memory-job.mjs",
     "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/runtime-hooks/memory-turn.mjs",
+    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-command.mjs",
     "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-connection.mjs",
     "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/runtime-record.mjs",
     "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/setup-completion.mjs",
@@ -231,6 +233,7 @@ for relative in [
     "lib/memorax-code-codebuddy-adapter/package.json",
     "lib/memorax-code-codebuddy-adapter/.codebuddy-plugin/plugin.json",
     "lib/memorax-code-codebuddy-adapter/hooks/hooks.json",
+    "lib/memorax-code-codebuddy-adapter/hooks/pending-state.mjs",
     "lib/memorax-code-codebuddy-adapter/hooks/runtime-hook.mjs",
     "lib/memorax-code-codebuddy-adapter/hooks/common-runtime.mjs",
     "lib/memorax-code-codebuddy-adapter/hooks/repo-memory-job.mjs",
@@ -442,6 +445,7 @@ for relative in \
   lib/trial-setup.mjs \
   lib/windows-cli-invocation.mjs \
   lib/windows-user-path.mjs \
+  lib/memorax-code-adapter-common/src/backend-command.mjs \
   lib/memorax-code-adapter-common/src/backend-connection.mjs \
   lib/memorax-code-adapter-common/src/config-utils.mjs \
   lib/memorax-code-adapter-common/src/hooks/client-hook-launcher.mjs \
@@ -488,6 +492,7 @@ for relative in \
   lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/runtime-shell.json \
   lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/repo-memory-job.mjs \
   lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/runtime-hooks/memory-turn.mjs \
+  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-command.mjs \
   lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-connection.mjs \
   lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/runtime-record.mjs \
   lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/setup-completion.mjs \
@@ -528,6 +533,7 @@ for relative in \
   lib/memorax-code-codebuddy-adapter/package.json \
   lib/memorax-code-codebuddy-adapter/.codebuddy-plugin/plugin.json \
   lib/memorax-code-codebuddy-adapter/hooks/hooks.json \
+  lib/memorax-code-codebuddy-adapter/hooks/pending-state.mjs \
   lib/memorax-code-codebuddy-adapter/hooks/runtime-hook.mjs \
   lib/memorax-code-codebuddy-adapter/hooks/common-runtime.mjs \
   lib/memorax-code-codebuddy-adapter/hooks/repo-memory-job.mjs \
