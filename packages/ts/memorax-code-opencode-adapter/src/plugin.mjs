@@ -62,6 +62,8 @@ export function createMemoraxOpenCodePlugin(options = {}) {
           .then(() => {
             backendEnsureSettled = true;
           });
+        // All prompts share this instance's wait budget; expiry must not cancel
+        // recovery that accepted-turn writeback can still await.
         backendPromptGatePromise = Promise.race([
           backendEnsurePromise.then(() => true),
           delay(backendPromptWaitTimeoutMs, false, { ref: false }),
@@ -138,6 +140,8 @@ export function createMemoraxOpenCodePlugin(options = {}) {
     }
 
     function queueSessionFlush(sessionId, target) {
+      // Idle and error notifications can overlap without awaiting plugin work.
+      // Queue SDK reads so later tasks see which Turns still need submission.
       const previous = sessionFlushes.get(sessionId) ?? Promise.resolve();
       const queued = previous
         .catch(() => undefined)

@@ -169,6 +169,8 @@ export function createOpenCodeMemoryHookRuntime(
           sessionId: command.sessionId,
           cwd: command.cwd ?? entry?.cwd,
           workspaceKind: command.workspaceKind ?? entry?.workspaceKind,
+          // SDK messages establish content identity, not the session's workspace scope.
+          // Require the binding established by a prior turn-start.
           requireBoundScope: true,
         }),
         userText: materialized.turn.userPrompt,
