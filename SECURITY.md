@@ -48,7 +48,8 @@ Please allow time for triage and remediation before public disclosure.
   installed npm package name and its `latest` or `preview` tag. Set
   `MEMORAX_CODE_AUTO_UPDATE=false` when deployment policy requires manual
   package review. A changed target is installed by exact version and
-  reconciliation preserves the configured client selection.
+  reconciliation preserves explicit client choices. Selection of newly
+  detected clients is described in [Configuration](docs/configuration.md#client-selection).
 - Codex update reconciliation may trust new or changed Hooks without a prompt
   only after the current marketplace identity and exact Hook selection are
   validated. The selection is checked again before and after the config write;
@@ -77,9 +78,7 @@ Please allow time for triage and remediation before public disclosure.
   authority and must not be copied between users or edited by hand.
 - The managed CodeBuddy/WorkBuddy plugin reads native JSONL transcripts from the
   client-owned project history and sends only normalized turn data required for
-  retrieval, trace, or writeback. Repo Memory jobs run a bounded headless
-  CodeBuddy process with `--dangerously-skip-permissions`; use this only for a
-  Backend-authorized Git worktree and never for untrusted source.
+  retrieval, trace, or writeback.
 - The managed Trae adapter merges only marker-owned `SessionStart`,
   `UserPromptSubmit`, and `Stop` entries into Trae's `hooks.json`, refuses to
   replace an unmanaged `memorax-code` Skill, and removes only managed assets.
@@ -111,6 +110,25 @@ Please allow time for triage and remediation before public disclosure.
   discarded during the upgrade rather than migrated or flushed. Git pointer
   files, symlinked markers, unreadable metadata, and other conflicting session
   scope remain fail closed.
+
+### Background Repo Memory execution
+
+Backend workspace authorization establishes which repository a job belongs to;
+it does not sandbox the coding agent that executes the job. These background
+Repo Memory runners use the following native execution permissions:
+
+| Runner | Execution permissions |
+| --- | --- |
+| Codex | `codex exec --sandbox danger-full-access` |
+| Claude Code | `--dangerously-skip-permissions` |
+| CodeBuddy/WorkBuddy | `--dangerously-skip-permissions` |
+| OpenCode | A dedicated session allows `edit`, `bash`, `webfetch`, `doom_loop`, and `external_directory` for `*` |
+| DSH | Uses the selected managed headless Profile via `--profile`; the adapter supplies no additional permission flag |
+| Trae | No automatic background runner |
+
+Run these jobs only against trusted source in an appropriately trusted local
+environment. Worker timeouts and repository validation bound lifecycle and
+identity; they do not restrict filesystem or tool access to that repository.
 
 ### MemoraX memory traffic
 
@@ -177,19 +195,15 @@ is a separate trust decision; configure only a compatible MemoraX service you
 trust.
 
 Treat the MemoraX API key, trial Mark ID, Base User ID, repository identity,
-queries, selected writeback content, and saved memories as sensitive. Disable
-writes immediately with:
-
-```bash
-MEMORAX_CODE_MEMORAX_WRITEBACK_ENABLED=false
-```
-
-For a persistent disable, set:
-
-```toml
-[memory.writeback]
-enabled = false
-```
+queries, selected writeback content, and saved memories as sensitive.
+Automatic writeback and explicit Add are independent: persistent disabling of
+both requires `[memory.writeback].enabled = false` and
+`[memory.cli].add_enabled = false`, without enabling environment overrides.
+The global environment switch disables both only when its value is exactly
+`false`. Follow [Disabling memory writes](docs/configuration.md#disabling-memory-writes)
+for commands and process-inheritance requirements. These controls do not
+cancel in-flight requests or guarantee removal of previously buffered turns;
+graceful Backend shutdown can flush pending writeback.
 
 ## Local Data and Diagnostics
 
@@ -235,9 +249,13 @@ remain owned by DSH. A complete product uninstall clears the setup-completion
 record so a later installation requires foreground setup again. It
 intentionally retains:
 
-- `MEMORAX_CODE_HOME`, including configuration, secure account-free
-  credentials, and local traces;
+- `MEMORAX_CODE_HOME`, including private configuration and its API-key copy,
+  local traces, and retained runtime records;
+- account-free provisioning credentials and account/project metadata in the
+  current user's operating-system credential store, separately from
+  `MEMORAX_CODE_HOME`;
 - Claude plugin data;
+- DSH Profiles and native session data;
 - client provider configuration; and
 - memories already stored in MemoraX.
 

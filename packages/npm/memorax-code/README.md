@@ -78,6 +78,8 @@ memorax-code status
 memorax-cli status
 ```
 
+In Windows PowerShell, use `memorax-cli.cmd status`.
+
 For configuration or troubleshooting, see the documentation shipped with the
 package:
 
