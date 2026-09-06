@@ -99,6 +99,8 @@ export function atomicWriteText(path, value) {
   }
 }
 
+// timeoutMs limits acquisition waits; staleMs governs stale-owner checks.
+// Neither is a lease on a live owner's lock. The callback must finish synchronously.
 export function withJsonFileLock(path, operation, options = {}) {
   const timeoutMs = positiveInteger(options.timeoutMs, JSON_FILE_LOCK_TIMEOUT_MS);
   const staleMs = positiveInteger(options.staleMs, JSON_FILE_LOCK_STALE_MS);
@@ -136,6 +138,8 @@ export function withJsonFileLock(path, operation, options = {}) {
   }
 }
 
+// signal can prevent the callback from starting, but cannot interrupt it.
+// Once started, operation holds the lock until its returned promise settles.
 export async function withJsonFileLockAsync(path, operation, options = {}) {
   const timeoutMs = positiveInteger(options.timeoutMs, JSON_FILE_LOCK_TIMEOUT_MS);
   const staleMs = positiveInteger(options.staleMs, JSON_FILE_LOCK_STALE_MS);
