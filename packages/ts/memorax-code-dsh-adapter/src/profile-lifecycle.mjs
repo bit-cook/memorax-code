@@ -567,6 +567,8 @@ function ensureDshPluginInstalledUnlocked(paths, options) {
     updatedAt: new Date().toISOString(),
   };
   atomicWriteJson(paths.statePath, nextState);
+  // A failed reconciliation may reinstall the prior bundle during rollback,
+  // so retire old generations only after every target Profile succeeds.
   if (failedProfiles.length === 0 && managedProfiles.length > 0) {
     cleanupRuntimeGenerations(paths.runtimeRoot, runtimeBundleRoot);
   }
@@ -656,6 +658,8 @@ function rollbackDshPluginReconciliation(paths, options, state, mutatedProfiles,
         updatedAt: new Date().toISOString(),
       }
     : state;
+  // Keep runtime authority disabled until installed Profiles have been
+  // verified against the prior bundle, even if native rollback commands succeeded.
   const verificationState = rollbackState.enabled
     ? { ...rollbackState, enabled: false }
     : rollbackState;
