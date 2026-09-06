@@ -182,6 +182,8 @@ async function updateVersionedCodexPlugin(
   const marketplaceRoot = codexCliMarketplaceRoot(codexHome);
   const marketplacePath = join(marketplaceRoot, ".agents", "plugins", "marketplace.json");
   const pluginSourcePath = join(marketplaceRoot, "versions", version, "plugins", PLUGIN_NAME);
+  // Existing sessions may still reference an older directory. Publish or reuse
+  // immutable versioned artifacts before switching the marketplace pointer.
   await publishImmutableDirectory(pluginSourcePath, dirname(pluginSourcePath), version, async (temporaryRoot) => {
     await stagePluginSource(sourceRoot, temporaryRoot);
     await writePluginMetadata(temporaryRoot, codexCommand);
@@ -367,12 +369,17 @@ export async function removeCodexPlugin(options: CodexPluginRemoveOptions = {}):
   const removedPaths: string[] = [];
 
   const pluginRemove = await removeActivatedCodexPlugin(options, home, codexHome);
-  const marketplaceChanged = await removePersonalMarketplaceEntry(marketplacePath);
-  await removeStagedPluginSource(pluginSourcePath, removedPaths);
-  await removeCachedPluginRoots(codexHome, removedPaths);
+  let marketplaceChanged = false;
+  // A failed native removal may leave registration pointing at these files.
+  // Retain them for retry and let the outer lifecycle stop npm removal.
+  if (pluginRemove.ok) {
+    marketplaceChanged = await removePersonalMarketplaceEntry(marketplacePath);
+    await removeStagedPluginSource(pluginSourcePath, removedPaths);
+    await removeCachedPluginRoots(codexHome, removedPaths);
+  }
 
   return {
-    ok: true,
+    ok: pluginRemove.ok,
     action: "codex-plugin-remove",
     codexHome,
     marketplacePath,

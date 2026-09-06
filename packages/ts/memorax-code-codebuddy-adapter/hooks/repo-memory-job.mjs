@@ -24,6 +24,8 @@ try {
       });
       return [
         codeBuddy,
+        // Load this installation's Skill explicitly; the headless worker cannot
+        // rely on the GUI's plugin environment or its path format.
         "--plugin-dir",
         pluginRoot,
         "--print",

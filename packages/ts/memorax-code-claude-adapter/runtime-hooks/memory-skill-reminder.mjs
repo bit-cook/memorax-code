@@ -39,6 +39,8 @@ async function recordReminder(reminder) {
   const promptId = reminder.turnId;
   if (!promptId || !reminder.transcriptPath) return;
   const connection = resolveBackendConnection();
+  // Optional trace recording must not hold up the reminder for the full memory
+  // request timeout; the shared runner still emits context when recording fails.
   const timeoutMs = Math.min(
     parsePositiveInt(
       process.env.MEMORAX_CODE_CLAUDE_MEMORY_HOOK_TIMEOUT_MS,

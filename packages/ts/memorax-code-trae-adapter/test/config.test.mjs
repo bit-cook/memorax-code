@@ -166,6 +166,89 @@ test("Trae install merges managed Hooks and Skill without changing user Hooks", 
   }
 });
 
+test("Trae runtime generations track recovery metadata without mutating previous generations", async () => {
+  const fixture = await createFixture("recovery-metadata");
+  const npmEnvironment = {
+    MEMORAX_CODE_NPM_EXEC_PATH: process.env.MEMORAX_CODE_NPM_EXEC_PATH,
+    npm_execpath: process.env.npm_execpath,
+  };
+  try {
+    for (const key of Object.keys(npmEnvironment)) delete process.env[key];
+    const movedCommand = join(fixture.root, "moved-memorax-code.mjs");
+    const npmPath = join(fixture.root, "npm-cli.js");
+    const movedNpmPath = join(fixture.root, "moved-npm-cli.js");
+    await Promise.all([movedCommand, npmPath, movedNpmPath]
+      .map((path) => writeFile(path, "// Package path fixture; never executed.\n")));
+    const generations = [];
+    for (const [memoraxCodeCommand, npmExecPath] of [
+      [fixture.options.memoraxCodeCommand, npmPath],
+      [movedCommand, npmPath],
+      [movedCommand, movedNpmPath],
+    ]) {
+      const options = { ...fixture.options, platform: "linux", memoraxCodeCommand, npmExecPath };
+      const installed = await enableTraeAdapter(options);
+      assert.equal(installed.ok, true);
+      assert.equal(installed.changed, true);
+      const state = JSON.parse(await readFile(installed.statePath, "utf8"));
+      for (const previous of generations) {
+        assert.notEqual(state.runtimeDigest, previous.digest, "changed recovery paths require a new generation");
+      }
+      const metadataPath = join(state.runtimeRoot, state.runtimeDigest, ".memorax-code-package.json");
+      const metadata = await readFile(metadataPath, "utf8");
+      assert.deepEqual(JSON.parse(metadata), {
+        version: 1,
+        memoraxCodeCommand,
+        npmExecPath,
+        memoraxCodeHome: fixture.memoraxCodeHome,
+        traeHome: fixture.traeHome,
+        runtimeDigest: state.runtimeDigest,
+      });
+      const hooks = JSON.parse(await readFile(join(fixture.traeHome, "hooks.json"), "utf8"));
+      assert.ok(state.hookCommand.includes(state.runtimePath));
+      for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+        const commands = hooks.hooks[event]
+          .flatMap((group) => group.hooks ?? [])
+          .map((hook) => hook.command)
+          .filter((command) => command?.includes("--memorax-code-trae-hook-v1"));
+        assert.deepEqual(commands, [state.hookCommand]);
+      }
+
+      const unchanged = await enableTraeAdapter(options);
+      assert.equal(unchanged.ok, true);
+      assert.equal(unchanged.changed, false);
+      const unchangedState = JSON.parse(await readFile(unchanged.statePath, "utf8"));
+      assert.equal(unchangedState.runtimeDigest, state.runtimeDigest);
+      assert.equal(unchangedState.runtimePath, state.runtimePath);
+      generations.push({ digest: state.runtimeDigest, metadataPath, metadata });
+    }
+
+    const recoveryOptions = { ...fixture.options, platform: "linux", memoraxCodeCommand: movedCommand };
+    const retained = await enableTraeAdapter(recoveryOptions);
+    assert.equal(retained.ok, true);
+    assert.equal(retained.changed, false);
+    const retainedState = JSON.parse(await readFile(retained.statePath, "utf8"));
+    assert.equal(retainedState.runtimeDigest, generations[2].digest);
+
+    process.env.MEMORAX_CODE_NPM_EXEC_PATH = npmPath;
+    process.env.npm_execpath = movedNpmPath;
+    const recovered = await enableTraeAdapter(recoveryOptions);
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.changed, true);
+    const recoveredState = JSON.parse(await readFile(recovered.statePath, "utf8"));
+    assert.equal(recoveredState.runtimeDigest, generations[1].digest);
+
+    for (const generation of generations) {
+      assert.equal(await readFile(generation.metadataPath, "utf8"), generation.metadata);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(npmEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("Trae install resumes from a persisted ownership intent", async () => {
   const fixture = await createFixture("install-recovery");
   try {

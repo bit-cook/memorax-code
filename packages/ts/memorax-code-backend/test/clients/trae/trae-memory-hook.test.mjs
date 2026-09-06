@@ -170,6 +170,76 @@ test("Trae runtime preserves interruption authority after coordinator metadata e
   }
 });
 
+test("Trae runtime preserves a replacement Turn when an older Stop finishes", async () => {
+  const fixture = await createFixture("overlapping-stop");
+  const writes = [];
+  const baseRepositoryMemorySession = createRepositoryMemorySessionRuntime();
+  let now = 1_700_000_000_000;
+  const ttlMs = 5 * 60 * 1000;
+  let resolveCalls = 0;
+  let markStopStarted;
+  let releaseStop;
+  const stopStarted = new Promise((resolve) => { markStopStarted = resolve; });
+  const stopGate = new Promise((resolve) => { releaseStop = resolve; });
+  const repositoryMemorySession = {
+    async resolve(input) {
+      resolveCalls += 1;
+      if (resolveCalls === 2) {
+        markStopStarted();
+        await stopGate;
+      }
+      return await baseRepositoryMemorySession.resolve(input);
+    },
+    close() {
+      baseRepositoryMemorySession.close();
+    },
+  };
+  const runtime = createTraeMemoryHookRuntime({
+    env: configuredEnv(fixture.home, { MEMORAX_CODE_TRAE_TRACE_ENABLED: "true" }),
+    automaticWriteback: (request) => { writes.push(request); return { accepted: true }; },
+    repositoryMemorySession,
+    now: () => now,
+    ttlMs,
+  });
+  const first = turnStart("trae-overlapping-stop", "Finish the first Turn.", fixture.workspace, now);
+  const second = turnStart(first.sessionId, "Start a long replacement Turn.", fixture.workspace, now + 1);
+  let pendingStop;
+  try {
+    await runtime.recordTurnStart(first);
+    pendingStop = runtime.writeback({ ...first, lastAssistantMessage: "The first Turn completed." });
+    await stopStarted;
+    now += 1;
+    await runtime.recordTurnStart(second);
+    releaseStop();
+    await pendingStop;
+
+    // Expire coordinator metadata so only the retained active snapshot can
+    // preserve the second Turn's interruption authority when it is replaced.
+    now += ttlMs + 1;
+    assert.equal(runtime.size(), 0);
+    const third = turnStart(first.sessionId, "Replace the long Turn.", fixture.workspace, now);
+    await runtime.recordTurnStart(third);
+    assert.deepEqual(await runtime.writeback({
+      ...third,
+      lastAssistantMessage: "The newest Turn completed.",
+    }), { ok: true, scheduled: true });
+    const events = (await readFile(traeTracePaths(fixture.home).eventsJsonl(first.sessionId), "utf8"))
+      .trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.deepEqual(
+      events.filter((event) => event.type === "turn_end" && event.trace.turn_id === second.turnId)
+        .map((event) => event.outcome),
+      ["interrupted"],
+    );
+    assert.deepEqual(writes.map(({ userText }) => userText), [first.prompt, third.prompt]);
+  } finally {
+    releaseStop();
+    if (pendingStop) await Promise.allSettled([pendingStop]);
+    runtime.close();
+    repositoryMemorySession.close();
+    await fixture.cleanup();
+  }
+});
+
 test("Trae accepts the replacement Turn Stop while its start retrieval is pending", async () => {
   const fixture = await createFixture("pending-retrieval-stop");
   const writes = [];

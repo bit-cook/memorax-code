@@ -146,6 +146,8 @@ if (event === "SessionStart") {
   const record = (await readPending(pendingPath))[sessionId];
   if (!record || record.transcriptPath !== transcriptPath) process.exit(0);
   const response = await post("/memory/writeback", { version: 1, client: "codebuddy", sessionId, turnId: record.turnId, transcriptPath, cwd: record.cwd ?? stringValue(input.cwd), workspaceKind: record.workspaceKind ?? stringValue(input.workspaceKind) });
+  // Retain pending state until Backend enqueue acceptance. A new turn may have
+  // replaced it during the request, so cleanup must still match the submitted turn.
   if (response?.ok === true && response?.scheduled === true) {
     await updatePending(pendingPath, (state) => {
       if (state[sessionId]?.turnId === record.turnId) delete state[sessionId];

@@ -41,6 +41,8 @@ export function createCodeBuddyMemoryHookRuntime(options: Options = {}): CodeBud
   const coordinator = memory.turnCoordinator;
   return {
     async recordTurnStart(command) {
+      // Interrupted turns may never emit Stop. Reconcile before the new turn
+      // replaces the session's current trace identity.
       await reconcilePreviousInterruptedTurn(coordinator, command, options, now);
       const traceContext = traceContextFromCodeBuddyHookBody(command, new Date(now()).toISOString());
       return memory.recordTurnStart({
@@ -177,6 +179,8 @@ async function reconcilePreviousInterruptedTurn(
 ): Promise<void> {
   const candidate = await previousInterruptedTurnCandidate(coordinator, currentTurn, options, now);
   if (!candidate) return;
+  // Trace and cached metadata only locate the candidate; the native transcript
+  // must confirm interruption before we close it and discard pending metadata.
   const transcript = await readCodeBuddyInterruptedTranscriptTurn({
     transcriptPath: candidate.transcriptPath,
     sessionId: candidate.sessionId,

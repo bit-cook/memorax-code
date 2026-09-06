@@ -264,6 +264,8 @@ function requestedSessionRecords(
   records: JsonRecord[],
   requestedSessionId: string,
 ): JsonRecord[] | undefined {
+  // Imported history may precede this Session, but must not reappear inside it.
+  // Exclude that prefix so parent traversal cannot import another Session's content.
   let requestedSessionStart: number | undefined;
   for (const [index, record] of records.entries()) {
     const sessionId = sessionIdFromRecord(record);
@@ -310,6 +312,8 @@ type ClaudePromptBranch = Readonly<{
 function maximalTerminalLineages<T extends Readonly<{ branch: ClaudePromptBranch }>>(
   candidates: readonly T[],
 ): T[] {
+  // Ancestor and descendant end_turn records can be snapshots of one completion.
+  // Keep terminal descendants; sibling branches remain ambiguous regardless of file order.
   const indexesByRecord = new Map<JsonRecord, number[]>();
   const indexesByUuid = new Map<string, number[]>();
   for (const [index, candidate] of candidates.entries()) {
@@ -430,6 +434,8 @@ function interactivePromptIndex(
 }
 
 function interruptionMarker(record: JsonRecord): boolean {
+  // interruptedMessageId signals interruption but need not be a transcript record UUID.
+  // Associate content through the marker's parentUuid chain instead.
   return record.type === "user"
     && record.isSidechain !== true
     && Boolean(stringValue(record.interruptedMessageId ?? record.interrupted_message_id));

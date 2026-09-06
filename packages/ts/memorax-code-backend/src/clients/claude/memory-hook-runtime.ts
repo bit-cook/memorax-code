@@ -154,6 +154,8 @@ export function createClaudeMemoryHookRuntime(
       if (turnEndRecord && !turnEndRecord.written && turnEndRecord.reason === "duplicate_event") {
         await recordClaudeTurnMaterialization(options, traceContext, transcript.turn);
       }
+      // The Hook reply is diagnostic evidence only; persisted transcript content
+      // remains authoritative even when the two texts differ.
       recordAssistantConsistencyDiagnostic(
         transcript.turn.assistantReply,
         request.lastAssistantMessage,
@@ -207,6 +209,8 @@ async function readExactTranscriptTurnWithRetry(
   input: { transcriptPath: string; sessionId: string; promptId: string },
   options: ClaudeMemoryHookRuntimeOptions,
 ): Promise<ClaudeTranscriptTurnResult> {
+  // Stop may arrive before transcript writes finish. Retry read/content
+  // availability failures, but reject identity mismatches and branch ambiguity.
   const attempts = positiveInteger(options.transcriptReadAttempts, DEFAULT_TRANSCRIPT_READ_ATTEMPTS);
   const retryDelayMs = nonNegativeInteger(options.transcriptRetryDelayMs, DEFAULT_TRANSCRIPT_RETRY_DELAY_MS);
   let result: ClaudeTranscriptTurnResult = { ok: false, reason: "turn_not_found" };

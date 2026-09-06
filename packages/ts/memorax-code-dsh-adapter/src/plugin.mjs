@@ -99,6 +99,8 @@ export function registerMemoraxCodePlugin(ctx, dependencies) {
         event.data,
       );
       if (pendingContext) {
+        // Returning middleware context does not guarantee DSH accepted it; commit
+        // injection state only when the matching native message is published.
         pendingContext.personalContext.commit();
         if (pendingContext.personalContext.triggers.length > 0) {
           trackPending(pendingReminderTraces, recordSkillReminder({

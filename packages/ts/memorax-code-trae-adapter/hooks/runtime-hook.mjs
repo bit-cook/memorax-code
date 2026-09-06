@@ -104,6 +104,7 @@ if (event === "SessionStart") {
     cwd,
     workspaceKind,
   });
+  // Only accepted starts may replace the persisted prompt used to pair Stop.
   if (response?.ok !== true || !commitActiveTurn(activeTurnPlan)) process.exit(0);
   const repoMemoryWorktree = stringValue(response?.repoMemoryWorktree);
   const reminderResult = await evaluateMemorySkillReminder({
@@ -139,6 +140,8 @@ if (event === "SessionStart") {
 } else {
   const lastAssistantMessage = assistantMessage(input);
   if (!lastAssistantMessage) process.exit(0);
+  // Trae has no stable transcript or native Stop Turn ID. The Hook pair is the
+  // content authority, but a late Stop cannot prove which prompt it originally answered.
   const activeTurn = readActiveTurn(sessionId);
   if (!activeTurn) process.exit(0);
   const response = await post("/memory/writeback", {
@@ -184,6 +187,8 @@ function commitActiveTurn({ record, expectedTurnId }) {
     const state = activeTurnState();
     pruneActiveTurns(state);
     const current = validActiveTurn(state.sessions?.[record.sessionId], record.sessionId);
+    // The HTTP request runs outside this lock; another Hook may have advanced
+    // the session since preparation. Do not overwrite its accepted pairing.
     if (current?.turnId !== expectedTurnId && current?.turnId !== record.turnId) return false;
     state.sessions[record.sessionId] = record;
     const now = Date.now();
@@ -206,6 +211,7 @@ function readActiveTurn(sessionId) {
 function removeActiveTurn(sessionId, turnId) {
   withJsonFileLock(activeTurnsPath, () => {
     const state = activeTurnState();
+    // A delayed writeback response must not clear a replacement turn.
     if (state.sessions?.[sessionId]?.turnId === turnId) delete state.sessions[sessionId];
     state.updatedAt = new Date().toISOString();
     atomicWriteJson(activeTurnsPath, state);
