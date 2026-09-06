@@ -63,7 +63,24 @@ async function enableTraeAdapterUnlocked(paths, options) {
     return failure("hooks_invalid", paths, error);
   }
 
-  const runtimeDigest = runtimeSourceDigest(paths);
+  const memoraxCodeCommand = stringOption(options.memoraxCodeCommand) ?? defaultMemoraxCodeCommand();
+  const previousMetadata = previousState?.runtimePath
+    ? readJsonFile(join(dirname(dirname(previousState.runtimePath)), ".memorax-code-package.json"))?.value
+    : undefined;
+  // Hook recovery forwards npm through MEMORAX_CODE_NPM_EXEC_PATH. A direct
+  // lifecycle command may have neither variable, so retain a still-valid entrypoint.
+  const npmExecPath = absoluteRegularFile(options.npmExecPath
+    ?? process.env.MEMORAX_CODE_NPM_EXEC_PATH
+    ?? process.env.npm_execpath
+    ?? previousMetadata?.npmExecPath);
+  const runtimeMetadata = {
+    version: 1,
+    ...(memoraxCodeCommand ? { memoraxCodeCommand } : {}),
+    ...(npmExecPath ? { npmExecPath } : {}),
+    memoraxCodeHome: paths.memoraxCodeHome,
+    traeHome: paths.traeHome,
+  };
+  const runtimeDigest = runtimeSourceDigest(paths, runtimeMetadata);
   const generationPath = join(paths.runtimeRoot, runtimeDigest);
   const runtimePath = join(generationPath, "hooks", "runtime-hook.mjs");
   const hookCommand = traeHookCommand(
@@ -72,7 +89,6 @@ async function enableTraeAdapterUnlocked(paths, options) {
     absoluteRegularFile(options.nodePath) ?? process.execPath,
     options.powershellPath ?? defaultWindowsPowerShellPath(),
   );
-  const memoraxCodeCommand = stringOption(options.memoraxCodeCommand) ?? defaultMemoraxCodeCommand();
   const skillDigest = skillDirectoryDigest(paths.skillSourcePath);
   const skillCurrent = directoryDigestIfPresent(paths.skillPath, SKILL_PACKAGE_METADATA) === skillDigest
     && skillPackageMetadataCurrent(paths.skillPath, memoraxCodeCommand);
@@ -101,8 +117,10 @@ async function enableTraeAdapterUnlocked(paths, options) {
   };
 
   try {
+    // Claim partial artifacts before publishing them so an interrupted install
+    // can resume without treating its own Skill as user-owned content.
     atomicWriteJson(paths.statePath, { ...state, enabled: false, installPending: true });
-    materializeRuntimeGeneration(paths, generationPath, runtimeDigest, options);
+    materializeRuntimeGeneration(paths, generationPath, runtimeDigest, runtimeMetadata);
     if (!skillCurrent) {
       materializeDirectory(paths.skillSourcePath, paths.skillPath, memoraxCodeCommand);
     }
@@ -292,6 +310,8 @@ export function traeHookCommand(
   if (platform !== "win32") {
     return `${posixShellLiteral(nodePath)} ${posixShellLiteral(runtimePath)} ${HOOK_MARKER}`;
   }
+  // Encoding keeps quoted paths out of Trae's outer command-line wrapper.
+  // Forward the Hook payload through stdin without embedding it in the command.
   const script = [
     "$ErrorActionPreference='Stop'",
     "$utf8=[Text.UTF8Encoding]::new($false)",
@@ -353,6 +373,7 @@ function resolvePaths(options) {
   return {
     memoraxCodeHome,
     traeHome,
+    // Uninstall removes the adapter directory; its lifecycle lock must survive.
     lifecycleLockTarget: resolve(
       options.lifecycleLockTarget ?? join(memoraxCodeHome, "adapters", "trae-lifecycle"),
     ),
@@ -411,7 +432,7 @@ function validateSources(paths) {
   return undefined;
 }
 
-function materializeRuntimeGeneration(paths, generationPath, runtimeDigest, options) {
+function materializeRuntimeGeneration(paths, generationPath, runtimeDigest, runtimeMetadata) {
   if (existsSync(generationPath)) {
     const record = readJsonFile(join(generationPath, "generation.json"));
     if (record?.unreadable || record?.value?.runtimeDigest !== runtimeDigest
@@ -429,14 +450,8 @@ function materializeRuntimeGeneration(paths, generationPath, runtimeDigest, opti
     cpSync(paths.runtimeObservationSourcePath, join(temporaryPath, "src", "runtime-observation.mjs"));
     cpSync(paths.commonSourcePath, join(temporaryPath, "memorax-code-adapter-common", "src"), { recursive: true });
     atomicWriteJson(join(temporaryPath, "generation.json"), { version: 1, runtimeDigest });
-    const memoraxCodeCommand = stringOption(options.memoraxCodeCommand) ?? defaultMemoraxCodeCommand();
-    const npmExecPath = absoluteRegularFile(options.npmExecPath ?? process.env.npm_execpath);
     atomicWriteJson(join(temporaryPath, ".memorax-code-package.json"), {
-      version: 1,
-      ...(memoraxCodeCommand ? { memoraxCodeCommand } : {}),
-      ...(npmExecPath ? { npmExecPath } : {}),
-      memoraxCodeHome: paths.memoraxCodeHome,
-      traeHome: paths.traeHome,
+      ...runtimeMetadata,
       runtimeDigest,
     });
     renameSync(temporaryPath, generationPath);
@@ -539,11 +554,16 @@ function materializeDirectory(source, destination, memoraxCodeCommand) {
   }
 }
 
-function runtimeSourceDigest(paths) {
+function runtimeSourceDigest(paths, runtimeMetadata) {
   const hash = createHash("sha256");
   hashFile(hash, paths.runtimeHookSourcePath, "hooks/runtime-hook.mjs");
   hashFile(hash, paths.runtimeObservationSourcePath, "src/runtime-observation.mjs");
   hashDirectory(hash, paths.commonSourcePath, "memorax-code-adapter-common/src");
+  // Recovery paths can change without source changes. Include the metadata
+  // in the identity so existing runtime generations remain immutable.
+  hash.update(".memorax-code-package.json\0");
+  hash.update(JSON.stringify(runtimeMetadata));
+  hash.update("\0");
   return hash.digest("hex");
 }
 

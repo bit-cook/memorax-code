@@ -60,6 +60,7 @@ export function createTraeMemoryHookRuntime(
   }, options);
   const { turnCoordinator } = memory;
   const interruptedTurns = new Set<string>();
+  // Active snapshots outlive coordinator TTL to preserve long turns' interruption authority.
   const activeTurns = new Map<string, MemoryTurnState>();
   const turnStartOperations = new Map<string, Promise<MemoryHookTurnStartResult>>();
   const runtimeTurnLimit = positiveInteger(options.maxEntries, 256);
@@ -92,6 +93,7 @@ export function createTraeMemoryHookRuntime(
         createdAt,
         traceContext,
         prompt: command.prompt,
+        // Publish before trace or retrieval can yield to a concurrent Stop.
         onTurnRegistered(turn) {
           activeTurns.delete(command.sessionId);
           activeTurns.set(command.sessionId, turn);
@@ -130,6 +132,8 @@ export function createTraeMemoryHookRuntime(
         traceContext,
       });
       await recordMaterializedTurn(traceContext, command, options);
+      // Clear only the captured snapshot; a newer turn may have registered
+      // while this Stop was awaiting completion.
       if (
         activeTurn?.clientTurnId === command.turnId
         && activeTurns.get(command.sessionId) === activeTurn
