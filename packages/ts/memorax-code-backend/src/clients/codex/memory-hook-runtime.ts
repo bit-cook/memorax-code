@@ -284,6 +284,8 @@ async function resolveHookRepositoryMemory(
     requireBoundScope,
   });
   if (!primary.ok || !registeredWorkspace || !entry.cwd) return primary;
+  // Validate both sources against the session binding; preferring the registry
+  // must not hide a conflicting Hook cwd.
   return await memory.resolveRepositoryMemory({
     sessionId: entry.sessionId,
     cwd: entry.cwd,
@@ -300,6 +302,8 @@ async function resolveCurrentHookRepositoryMemory(
   recoveredTraceContext?: TraceContext,
 ): Promise<ConfiguredRepositoryMemoryResult> {
   if (!entry) {
+    // Without Turn metadata, only the exact persisted current Turn can restore
+    // a missing scope binding; Stop fields alone cannot authorize a new binding.
     if (!recoveredTraceContext) {
       return await resolveHookRepositoryMemory({
         sessionId: request.sessionId!,
