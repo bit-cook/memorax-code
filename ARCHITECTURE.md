@@ -1005,6 +1005,11 @@ Placement rules:
   `test/shared-skill`, even though the canonical Skill source remains in the
   Codex adapter package. Native Hook wiring and consumer integration stay in
   the corresponding adapter suites.
+- In mixed adapter test files, separate direct common API checks from native
+  integration. Backend recovery options, job marker/lock records, and profile
+  readers have direct common tests. Native worker launch, completion validation,
+  Hook context injection, and Backend-authorized worktree selection retain
+  adapter integration coverage.
 - Backend, adapter-common, and shared Skill suites discover nested tests
   recursively. The six adapter suites currently discover only flat
   `test/*.test.mjs`; their package scripts must change before tests are nested.

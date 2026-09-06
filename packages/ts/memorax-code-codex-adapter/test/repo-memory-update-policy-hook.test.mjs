@@ -9,9 +9,11 @@ import { fileURLToPath } from "node:url";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const hookPath = join(packageRoot, "hooks", "repo-memory-update-policy.mjs");
 
-test("repo memory update policy hook evaluates config at repo-read time", () => {
+test("repo memory update policy hook evaluates cooldown using config and the updater-owned timestamp", () => {
   const fixture = createRepository();
-  writeProfile(fixture.repo, fixture.baseline, "2026-07-18T00:00:00Z");
+  writeProfile(fixture.repo, fixture.baseline, "2026-07-18T00:00:00Z", [
+    'updated_at: "2026-07-16T00:00:00Z"',
+  ]);
   writeFileSync(join(fixture.memoraxCodeHome, "config.toml"), [
     "[memory.repo_update]",
     'policy = "adaptive"',
@@ -62,26 +64,6 @@ test("repo memory update policy hook lets env override config", () => {
   assert.equal(decision.trigger, true);
   assert.equal(decision.reason, "pending_commit");
   assert.equal(decision.policySource, "configured");
-});
-
-test("repo memory update policy hook prefers the updater-owned generated_at timestamp", () => {
-  const fixture = createRepository();
-  writeProfile(
-    fixture.repo,
-    fixture.baseline,
-    "2026-07-18T00:30:00Z",
-    ['updated_at: "2026-07-16T00:00:00Z"'],
-  );
-  writeFileSync(join(fixture.memoraxCodeHome, "config.toml"), [
-    "[memory.repo_update]",
-    'policy = "daily"',
-    "cooldown_hours = 24",
-    "",
-  ].join("\n"));
-
-  const decision = evaluate(fixture, "2026-07-18T01:00:00Z");
-  assert.equal(decision.trigger, false);
-  assert.equal(decision.lastUpdateSource, "profile.generated_at");
 });
 
 test("repo memory update policy hook falls back to measured defaults for invalid env overrides", () => {

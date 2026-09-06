@@ -7,11 +7,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   markerPathForRepo,
-  readActiveRepoMemoryJobMarker,
-  releaseRepoMemoryStartupLock,
   repoMemoryJobsDir,
   startupLockPathForRepo,
-  tryAcquireRepoMemoryStartupLock,
 } from "../../memorax-code-adapter-common/src/repo-memory/repo-memory-job-marker.mjs";
 
 const jobHook = fileURLToPath(new URL("../hooks/repo-memory-job.mjs", import.meta.url));
@@ -161,7 +158,7 @@ test("repo memory maintain selects build for a structurally invalid bundle", () 
   assert.equal(countJobDirs(memoraxCodeHome), 0);
 });
 
-test("repo memory maintain returns no-op for a usable fresh bundle", () => {
+test("repo memory maintain returns no-op for a usable fresh bundle without a Python dependency", () => {
   const root = tempRoot("repo-memory-maintain-fresh-");
   const repo = join(root, "repo");
   const memoraxCodeHome = join(root, "memorax-code");
@@ -170,12 +167,15 @@ test("repo memory maintain returns no-op for a usable fresh bundle", () => {
 
   const result = runJob(["maintain", "--repo", repo, "--dry-run"], {
     MEMORAX_CODE_HOME: memoraxCodeHome,
+    MEMORAX_CODE_REPO_MEMORY_PYTHON_COMMAND: join(root, "missing-python"),
   });
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, true);
   assert.equal(payload.action, "none");
   assert.equal(payload.reason, "up_to_date");
   assert.equal(payload.bundleStatus, "usable");
+  assert.equal(payload.validation.ok, true);
   assert.equal(payload.policyDecision.trigger, false);
   assert.equal(payload.policyDecision.commitsBehind, 0);
   assert.equal(payload.job, undefined);
@@ -263,7 +263,7 @@ for (const baseline of ["", "0000000000000000000000000000000000000000"]) {
   });
 }
 
-test("repo memory maintain deduplicates against an active job before inspecting the bundle", () => {
+test("repo memory start and maintain reuse an active job before inspecting the bundle", () => {
   const root = tempRoot("repo-memory-maintain-deduplicate-");
   const repo = join(root, "repo");
   const memoraxCodeHome = join(root, "memorax-code");
@@ -278,6 +278,16 @@ test("repo memory maintain deduplicates against an active job before inspecting 
   const started = runJob(["start", "--mode", "build", "--repo", repo], env);
   assert.equal(started.status, 0, started.stderr);
   const startedPayload = JSON.parse(started.stdout);
+  assert.equal(startedPayload.alreadyRunning, false);
+  assert.equal(countJobDirs(memoraxCodeHome), 1);
+
+  const repeated = runJob(["start", "--mode", "build", "--repo", repo], env);
+  assert.equal(repeated.status, 0, repeated.stderr);
+  const repeatedPayload = JSON.parse(repeated.stdout);
+  assert.equal(repeatedPayload.alreadyRunning, true);
+  assert.equal(repeatedPayload.jobId, startedPayload.jobId);
+  assert.equal(repeatedPayload.outputLogPath, startedPayload.outputLogPath);
+  assert.equal(countJobDirs(memoraxCodeHome), 1);
 
   const maintained = runJob(["maintain", "--repo", repo, "--dry-run"], env);
   assert.equal(maintained.status, 0, maintained.stderr);
@@ -313,28 +323,6 @@ test("repo memory maintain degrades to a non-blocking no-op when policy evaluati
   assert.equal(countJobDirs(memoraxCodeHome), 0);
 });
 
-test("repo memory maintain no longer depends on the Python command override", () => {
-  const root = tempRoot("repo-memory-maintain-without-python-");
-  const repo = join(root, "repo");
-  const memoraxCodeHome = join(root, "memorax-code");
-  const head = initRepo(repo);
-  writeValidMemoryBundle(repo, head);
-
-  const result = runJob(["maintain", "--repo", repo, "--dry-run"], {
-    MEMORAX_CODE_HOME: memoraxCodeHome,
-    MEMORAX_CODE_REPO_MEMORY_PYTHON_COMMAND: join(root, "missing-python"),
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const payload = JSON.parse(result.stdout);
-  assert.equal(payload.ok, true);
-  assert.equal(payload.action, "none");
-  assert.equal(payload.reason, "up_to_date");
-  assert.equal(payload.bundleStatus, "usable");
-  assert.equal(payload.validation.ok, true);
-  assert.equal(payload.job, undefined);
-  assert.equal(countJobDirs(memoraxCodeHome), 0);
-});
-
 for (const expectedMode of ["build", "update"]) {
   test(`repo memory maintain launches and completes supervised ${expectedMode}`, () => {
     const root = tempRoot(`repo-memory-maintain-${expectedMode}-complete-`);
@@ -349,11 +337,13 @@ for (const expectedMode of ["build", "update"]) {
         runGit(repo, ["commit", "-m", `update ${index}`]);
       }
     }
+    const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+    const envLog = join(root, "worker-env.json");
     const fakeCodex = writeCompletingFakeCodex(root);
     const result = runJob(["maintain", "--repo", repo], {
       MEMORAX_CODE_HOME: memoraxCodeHome,
       MEMORAX_CODE_CODEX_COMMAND: fakeCodex,
-      FAKE_CODEX_ENV_LOG: join(root, "worker-env.json"),
+      FAKE_CODEX_ENV_LOG: envLog,
     });
     assert.equal(result.status, 0, result.stderr);
     const payload = JSON.parse(result.stdout);
@@ -363,9 +353,20 @@ for (const expectedMode of ["build", "update"]) {
 
     const state = waitForTerminal(payload.job.jobPath);
     assert.equal(state.status, "succeeded");
+    assert.equal(state.exitCode, 0);
     assert.equal(state.mode, expectedMode);
+    assert.equal(state.snapshotHead, head);
     assert.equal(state.validation.ok, true);
+    assert.equal(state.validation.profileHead, head);
     assert.equal(countJobDirs(memoraxCodeHome), 1);
+    waitForMarkerAbsent(memoraxCodeHome, repo);
+
+    const workerEnv = JSON.parse(readFileSync(envLog, "utf8"));
+    assert.equal(workerEnv.kind, "repo-memory");
+    assert.equal(workerEnv.jobId, payload.job.jobId);
+    assert.match(workerEnv.runId, /^[0-9a-f]{32}$/);
+    assert.equal(workerEnv.snapshotHead, head);
+    assert.equal(workerEnv.mode, expectedMode);
   });
 }
 
@@ -403,35 +404,6 @@ test("repo memory job launcher writes job state in MEMORAX_CODE_HOME", () => {
     /memorax-code-adapter-common[\\/]src[\\/]repo-memory[\\/]repo-memory-job-worker\.mjs$/,
   );
   killAndWait(payload.pid, payload.jobPath);
-});
-
-test("repo memory job launcher returns existing active job instead of spawning twice", () => {
-  const root = tempRoot("repo-memory-job-dedupe-");
-  const repo = join(root, "repo");
-  const memoraxCodeHome = join(root, "memorax-code");
-  initRepo(repo);
-  const fakeCodex = writeLongRunningFakeCodex(root);
-
-  const env = {
-    MEMORAX_CODE_HOME: memoraxCodeHome,
-    MEMORAX_CODE_CODEX_COMMAND: fakeCodex,
-    FAKE_CODEX_LOG: join(root, "fake-codex.log"),
-  };
-  const first = runJob(["start", "--mode", "build", "--repo", repo], env);
-  assert.equal(first.status, 0, first.stderr);
-  const firstPayload = JSON.parse(first.stdout);
-  assert.equal(firstPayload.alreadyRunning, false);
-  assert.equal(countJobDirs(memoraxCodeHome), 1);
-
-  const second = runJob(["start", "--mode", "build", "--repo", repo], env);
-  assert.equal(second.status, 0, second.stderr);
-  const secondPayload = JSON.parse(second.stdout);
-  assert.equal(secondPayload.alreadyRunning, true);
-  assert.equal(secondPayload.jobId, firstPayload.jobId);
-  assert.equal(secondPayload.outputLogPath, firstPayload.outputLogPath);
-  assert.equal(countJobDirs(memoraxCodeHome), 1);
-
-  killAndWait(firstPayload.pid, firstPayload.jobPath);
 });
 
 test("repo memory job launcher allows only one concurrent startup per repo", async () => {
@@ -509,40 +481,6 @@ test("repo memory job launcher overwrites marker after TTL expires", () => {
   assert.equal(marker.mode, "build");
 
   killAndWait(payload.pid, payload.jobPath);
-});
-
-test("repo memory job marker rejects unsupported versions", () => {
-  const root = tempRoot("repo-memory-job-marker-version-");
-  const repo = join(root, "repo");
-  const memoraxCodeHome = join(root, "memorax-code");
-  initRepo(repo);
-  writeMarker(memoraxCodeHome, repo, { version: 2 });
-
-  const state = readActiveRepoMemoryJobMarker({
-    memoraxCodeHome,
-    repoRealpath: realpathSync(repo),
-  });
-
-  assert.equal(state.active, false);
-  assert.equal(state.reason, "unsupported_version");
-  assert.equal(existsSync(state.markerPath), false);
-});
-
-test("repo memory job marker rejects incomplete current records", () => {
-  const root = tempRoot("repo-memory-job-marker-invalid-");
-  const repo = join(root, "repo");
-  const memoraxCodeHome = join(root, "memorax-code");
-  initRepo(repo);
-  writeMarker(memoraxCodeHome, repo, { runId: undefined });
-
-  const state = readActiveRepoMemoryJobMarker({
-    memoraxCodeHome,
-    repoRealpath: realpathSync(repo),
-  });
-
-  assert.equal(state.active, false);
-  assert.equal(state.reason, "invalid_record");
-  assert.equal(existsSync(state.markerPath), false);
 });
 
 test("repo memory job launcher does not start when startup state directory is invalid", () => {
@@ -624,23 +562,6 @@ test("repo memory job launcher removes old empty startup lockdir and starts job"
   killAndWait(payload.pid, payload.jobPath);
 });
 
-test("repo memory startup lock release preserves a replaced lock", () => {
-  const root = tempRoot("repo-memory-job-token-lock-");
-  const repo = join(root, "repo");
-  const memoraxCodeHome = join(root, "memorax-code");
-  mkdirSync(repo, { recursive: true });
-  const repoRealpath = realpathSync(repo);
-  const first = tryAcquireRepoMemoryStartupLock({ memoraxCodeHome, repoRealpath });
-  assert.equal(first.acquired, true);
-  releaseRepoMemoryStartupLock(first.lock);
-  const second = tryAcquireRepoMemoryStartupLock({ memoraxCodeHome, repoRealpath });
-  assert.equal(second.acquired, true);
-  releaseRepoMemoryStartupLock(first.lock);
-  assert.equal(existsSync(second.lock.lockDir), true);
-  releaseRepoMemoryStartupLock(second.lock);
-  assert.equal(existsSync(second.lock.lockDir), false);
-});
-
 test("repo memory job launcher removes stale startup lock and starts job", () => {
   const root = tempRoot("repo-memory-job-stale-lock-");
   const repo = join(root, "repo");
@@ -669,39 +590,6 @@ test("repo memory job launcher removes stale startup lock and starts job", () =>
 
   killAndWait(payload.pid, payload.jobPath);
 });
-
-for (const mode of ["build", "update"]) {
-  test(`repo memory job supervisor completes and validates ${mode}`, () => {
-    const root = tempRoot(`repo-memory-job-${mode}-success-`);
-    const repo = join(root, "repo");
-    const memoraxCodeHome = join(root, "memorax-code");
-    const head = initRepo(repo);
-    if (mode === "update") writeValidMemoryBundle(repo, head);
-    const envLog = join(root, "worker-env.json");
-    const fakeCodex = writeCompletingFakeCodex(root);
-    const result = runJob(["start", "--mode", mode, "--repo", repo], {
-      MEMORAX_CODE_HOME: memoraxCodeHome,
-      MEMORAX_CODE_CODEX_COMMAND: fakeCodex,
-      FAKE_CODEX_ENV_LOG: envLog,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    const payload = JSON.parse(result.stdout);
-    const state = waitForTerminal(payload.jobPath);
-    assert.equal(state.status, "succeeded");
-    assert.equal(state.exitCode, 0);
-    assert.equal(state.snapshotHead, head);
-    assert.equal(state.validation.ok, true);
-    assert.equal(state.validation.profileHead, head);
-    waitForMarkerAbsent(memoraxCodeHome, repo);
-
-    const workerEnv = JSON.parse(readFileSync(envLog, "utf8"));
-    assert.equal(workerEnv.kind, "repo-memory");
-    assert.equal(workerEnv.jobId, payload.jobId);
-    assert.match(workerEnv.runId, /^[0-9a-f]{32}$/);
-    assert.equal(workerEnv.snapshotHead, head);
-    assert.equal(workerEnv.mode, mode);
-  });
-}
 
 test("repo memory job supervisor fails when generated artifacts do not validate", () => {
   const root = tempRoot("repo-memory-job-validation-fail-");

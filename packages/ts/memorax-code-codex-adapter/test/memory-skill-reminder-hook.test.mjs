@@ -18,9 +18,6 @@ test("manifest reuses capture-cwd for compact and keeps one serialized UserPromp
   const sessionCommands = manifest.hooks.SessionStart.flatMap((group) => group.hooks).map((hook) => hook.command);
   const commands = manifest.hooks.UserPromptSubmit[0].hooks.map((hook) => hook.command);
 
-  const captureIndex = commands.indexOf("node \"$PLUGIN_ROOT/hooks/runtime-hook.mjs\" capture-cwd");
-  const memoryReminderIndex = commands.indexOf("node \"$PLUGIN_ROOT/hooks/runtime-hook.mjs\" memory-skill-reminder");
-  assert.ok(memoryReminderIndex > captureIndex);
   assert.deepEqual(commands, [
     "node \"$PLUGIN_ROOT/hooks/runtime-hook.mjs\" capture-cwd",
     "node \"$PLUGIN_ROOT/hooks/runtime-hook.mjs\" memory-skill-reminder",
@@ -34,32 +31,6 @@ test("manifest reuses capture-cwd for compact and keeps one serialized UserPromp
     "node \"$PLUGIN_ROOT/hooks/runtime-hook.mjs\" ensure-backend",
     "node \"$PLUGIN_ROOT/hooks/runtime-hook.mjs\" capture-cwd",
   ]);
-});
-
-test("memory skill reminder emits Codex context without creating repo profile state", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-memory-reminder-"));
-  const memoraxCodeHome = join(root, "memorax-code");
-  try {
-    await writeRegistry(memoraxCodeHome, {
-      "native-thread": {
-        key: "native-thread",
-        codexSessionId: "native-thread",
-      },
-    });
-    const result = await runHook({
-      hook_event_name: "UserPromptSubmit",
-      session_id: "native-thread",
-      turn_id: "turn-1",
-      transcript_path: "/tmp/native-thread.jsonl",
-      prompt: "first prompt",
-    }, { MEMORAX_CODE_HOME: memoraxCodeHome });
-
-    assert.equal(result.code, 0, result.stderr);
-    assertMemoryReminder(result.stdout);
-    await assert.rejects(readFile(join(memoraxCodeHome, "adapters", "codex", "repo-user-profile-injections.json"), "utf8"), /ENOENT/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
 });
 
 test("repo profile reminder is consumed once on the first prompt after compact", async () => {
@@ -80,6 +51,10 @@ test("repo profile reminder is consumed once on the first prompt after compact",
       transcript_path: "/tmp/native-thread.jsonl",
       prompt: "prompt 1",
     }, { MEMORAX_CODE_HOME: memoraxCodeHome });
+    assert.equal(first.code, 0, first.stderr);
+    assertMemoryReminder(first.stdout);
+    await assert.rejects(readFile(join(memoraxCodeHome, "adapters", "codex", "repo-user-profile-injections.json"), "utf8"), /ENOENT/);
+
     const compact = await runCaptureHook({
       hook_event_name: "SessionStart",
       session_id: "native-thread",
@@ -100,7 +75,6 @@ test("repo profile reminder is consumed once on the first prompt after compact",
       prompt: "prompt 3",
     }, { MEMORAX_CODE_HOME: memoraxCodeHome });
 
-    assertMemoryReminder(first.stdout);
     assert.equal(compact.stdout, "");
     assertProfileReminder(afterCompact.stdout);
     assert.equal(following.stdout, "");
