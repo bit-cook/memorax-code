@@ -256,6 +256,9 @@ Development Setup first. Shared Skill, Codex, and CodeBuddy/WorkBuddy suites
 require a current Backend build when run independently; their standalone test
 commands do not produce it. The common and shared Skill suites use the same
 Node test runner as the adapters and run through independent Make targets.
+The common suite runs from its own source and fixtures without an adapter or
+Backend build; its Repo Memory worker tests use a generic runner and validator.
+Shared Skill and native launcher tests cover the real canonical Skill validator.
 
 | Profile | Required checks |
 | --- | --- |
@@ -267,7 +270,7 @@ Node test runner as the adapters and run through independent Make targets.
 | OpenCode | `npm test --prefix packages/ts/memorax-code-opencode-adapter` |
 | CodeBuddy/WorkBuddy | `npm run build --prefix packages/ts/memorax-code-backend`, then `npm test --prefix packages/ts/memorax-code-codebuddy-adapter` |
 | Trae | `npm test --prefix packages/ts/memorax-code-trae-adapter` |
-| Repo Memory | Backend + Shared Skill: collector, validator, and updater cases use compiled Backend helpers through the canonical Skill launcher; add affected adapter profiles when their scheduling or launchers change |
+| Repo Memory | Backend + Shared Skill + `make test-adapter-common`: collector, validator, and updater cases use compiled Backend helpers through the canonical Skill launcher; common tests own scheduling and policy behavior. Add affected adapter profiles when their scheduling or launchers change |
 | Adapter-common/shared Hook | `make test-adapter-common`, affected Backend tests, and all six adapter suites; add Shared Skill for changes used by Skill readers or launchers and Install/artifacts when staged runtime or package layout changes |
 | Lifecycle report interpretation | Backend; add Install/artifacts for CLI or lifecycle behavior changes |
 | Trace/local-only boundary | Affected package tests plus `make test-npm-package` |

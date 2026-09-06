@@ -1007,9 +1007,15 @@ Placement rules:
   the corresponding adapter suites.
 - In mixed adapter test files, separate direct common API checks from native
   integration. Backend recovery options, job marker/lock records, and profile
-  readers have direct common tests. Native worker launch, completion validation,
-  Hook context injection, and Backend-authorized worktree selection retain
-  adapter integration coverage.
+  readers have direct common tests. Repo Memory supervisor and evaluator tests
+  also call common APIs directly, using real Git repositories and isolated
+  worker processes. Generic runner and validator fixtures exercise the job
+  protocol without depending on an adapter, Backend build, or Skill launcher.
+  These fixtures do not validate the real Repo Memory artifact schema; that
+  remains covered through the canonical Skill in `test/shared-skill` and native
+  launcher integration. Adapter suites retain command and metadata resolution,
+  final-message delivery, canonical-validator wiring, Hook context injection,
+  and Backend-authorized worktree selection.
 - Backend, adapter-common, and shared Skill suites discover nested tests
   recursively. The six adapter suites currently discover only flat
   `test/*.test.mjs`; their package scripts must change before tests are nested.
@@ -1032,6 +1038,7 @@ contracts without introducing a separate adapter test framework.
 | --- | --- | --- | --- |
 | One Backend capability | Matching `test/<area>` | Source boundaries when imports change | Backend |
 | Repo Memory collection, validation, or update | Shared Skill tests against the compiled Backend helper through the canonical launcher | Source boundaries and canonical Skill launcher | Repo Memory |
+| Repo Memory scheduling, supervision, or update policy | Direct common supervisor/evaluator tests and affected native launcher integration | Worker protocol and canonical Skill launcher | Adapter-common/shared Hook + Repo Memory |
 | Shared Skill guidance, resources, or launchers | Repository-root `test/shared-skill` | Canonical source mapping and package shape when staged | Shared Skill; add Install/artifacts when staged runtime or package layout changes |
 | Runtime composition | `test/app` | Backend source boundaries | Backend |
 | Hook HTTP or adapter-visible command schema | `test/transport/http` and affected adapter suites | Backend source boundaries and package shape when staged | Backend + Adapter-common/shared Hook; add Install/artifacts when staged package shape changes |
