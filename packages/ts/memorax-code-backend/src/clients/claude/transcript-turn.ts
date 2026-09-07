@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { parseNativeMessageTimestamp } from "../../shared/message-time.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -28,6 +29,8 @@ export type ClaudeTranscriptTurn = {
   sessionTurnIndex: number;
   userPrompt: string;
   assistantReply: string;
+  userTimestamp?: number;
+  assistantTimestamp?: number;
   activities: ClaudeTurnActivity[];
   usage?: ClaudeTurnTokenUsage;
 };
@@ -115,6 +118,7 @@ export function claudeTranscriptTurnFromJsonLines(
     branch: ClaudePromptBranch;
     userPrompt: string;
     assistantReply?: string;
+    assistantTimestamp?: number;
     activities: ClaudeTurnActivity[];
     usage?: ClaudeTurnTokenUsage;
   }> = [];
@@ -133,6 +137,9 @@ export function claudeTranscriptTurnFromJsonLines(
         branch,
         userPrompt: branch.userPrompt,
         ...(assistantReply ? { assistantReply } : {}),
+        // This dates the selected terminal transcript record; Claude does not
+        // expose an independent last-token completion time in this authority.
+        assistantTimestamp: parseNativeMessageTimestamp(record.timestamp),
         activities: claudeMemoryActivities(branch.assistantMessages),
         ...(usage ? { usage } : {}),
       });
@@ -153,6 +160,8 @@ export function claudeTranscriptTurnFromJsonLines(
         sessionTurnIndex,
         userPrompt: candidate.userPrompt,
         assistantReply: candidate.assistantReply,
+        ...(candidate.branch.userTimestamp === undefined ? {} : { userTimestamp: candidate.branch.userTimestamp }),
+        ...(candidate.assistantTimestamp === undefined ? {} : { assistantTimestamp: candidate.assistantTimestamp }),
         activities: candidate.activities,
         ...(candidate.usage ? { usage: candidate.usage } : {}),
       },
@@ -304,6 +313,7 @@ function transcriptRecords(transcript: string):
 type ClaudePromptBranch = Readonly<{
   promptId?: string;
   userPrompt?: string;
+  userTimestamp?: number;
   assistantMessages: JsonRecord[];
   records: JsonRecord[];
   ambiguous: boolean;
@@ -364,6 +374,7 @@ function promptBranch(
       return {
         promptId: promptIdFromRecord(current),
         userPrompt: prompt,
+        userTimestamp: parseNativeMessageTimestamp(current.timestamp),
         assistantMessages,
         records: branchRecords,
         ambiguous: false,

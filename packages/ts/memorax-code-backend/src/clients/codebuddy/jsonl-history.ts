@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { parseNativeMessageTimestamp } from "../../shared/message-time.js";
 import { codeBuddyPromptDigest, parseCodeBuddyTurnId } from "./turn-id.js";
 
 export type CodeBuddyHistoryRecord = Readonly<Record<string, unknown>>;
@@ -8,6 +9,8 @@ export type CodeBuddyTurn = Readonly<{
   sessionTurnIndex?: number;
   userPrompt: string;
   assistantReply: string;
+  userTimestamp?: number;
+  assistantTimestamp?: number;
   activities: readonly CodeBuddyActivity[];
 }>;
 export type CodeBuddyActivity = Readonly<{ kind: "tool"; name: string; input?: string; output?: string }>;
@@ -56,6 +59,9 @@ export function codeBuddyTranscriptTurnFromJsonLines(
   const assistant = branch[0];
   const reply = assistantText(assistant);
   if (!reply) return { ok: false, reason: "assistant_message_missing" };
+  // A timestamp is optional in supported transcripts; only the selected
+  // native record supplies it, never its tools or a different completed branch.
+  const assistantTimestamp = parseNativeMessageTimestamp(assistant.timestamp);
   return {
     ok: true,
     turn: {
@@ -63,6 +69,8 @@ export function codeBuddyTranscriptTurnFromJsonLines(
       turnId: input.turnId,
       userPrompt: selected.userPrompt,
       assistantReply: reply,
+      ...(selected.userTimestamp !== undefined ? { userTimestamp: selected.userTimestamp } : {}),
+      ...(assistantTimestamp !== undefined ? { assistantTimestamp } : {}),
       activities: turnActivities(selected.records),
       sessionTurnIndex: selected.sessionTurnIndex,
     },
@@ -100,6 +108,7 @@ export function codeBuddyInterruptedTranscriptTurnFromJsonLines(
 type SelectedCodeBuddyTurnBranch = Readonly<{
   records: ParsedHistoryRecord[];
   userPrompt: string;
+  userTimestamp?: number;
   sessionTurnIndex: number;
 }>;
 
@@ -136,6 +145,7 @@ function selectCodeBuddyTurnBranch(
     ok: true,
     records: recordsInBranch(records, userId),
     userPrompt,
+    userTimestamp: parseNativeMessageTimestamp(user.timestamp),
     sessionTurnIndex: users.indexOf(user) + 1,
   };
 }
@@ -160,7 +170,8 @@ function parseJsonLines(text: string): ParsedHistoryRecord[] | undefined {
         return undefined;
       }
     }
-    const newlineBytes = newline >= 0 ? (rawLine.endsWith("\r") ? 2 : 1) : 0;
+    // rawLine already includes CR when the delimiter is CRLF; only LF is missing.
+    const newlineBytes = newline >= 0 ? 1 : 0;
     byteOffset += Buffer.byteLength(rawLine, "utf8") + newlineBytes;
     cursor = newline >= 0 ? newline + 1 : text.length;
   }

@@ -81,6 +81,8 @@ export function createCodeBuddyMemoryHookRuntime(options: Options = {}): CodeBud
         resolveRepositoryMemory: async () => repositoryMemory,
         userText: transcript.turn.userPrompt,
         assistantText: transcript.turn.assistantReply,
+        userTimestamp: transcript.turn.userTimestamp,
+        assistantTimestamp: transcript.turn.assistantTimestamp,
         traceContext: traceContextFromCodeBuddyHookBody(command),
       });
       await recordCodeBuddyTurnMaterialization(options, traceContext, transcript.turn);

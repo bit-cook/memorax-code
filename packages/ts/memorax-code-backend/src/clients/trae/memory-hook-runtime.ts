@@ -15,6 +15,8 @@ import type {
   MemoryTurnWritebackSkipReason,
 } from "../../memory/turn-coordinator.js";
 import type { RepositoryMemoryScopeFailureReason } from "../../repository/scope.js";
+import { parseNativeMessageTimestamp } from "../../shared/message-time.js";
+import { parseTraeTurnId, traePromptDigest } from "./turn-id.js";
 import { traceContextFromTraeHookBody, type TraceContext } from "../../trace/context.js";
 import {
   markCurrentTraceTurnOutcome,
@@ -107,6 +109,7 @@ export function createTraeMemoryHookRuntime(
     },
 
     async writeback(command) {
+      const assistantObservedAt = command.assistantObservedAt ?? now();
       turnCoordinator.pruneExpired();
       const commandKey = traeRuntimeTurnKey(command.sessionId, command.turnId);
       const activeTurn = activeTurns.get(command.sessionId);
@@ -119,6 +122,11 @@ export function createTraeMemoryHookRuntime(
       }
       const key = traeTurnKey(command.sessionId, command.turnId);
       const entry = turnCoordinator.getTurn(key) ?? activeTurn;
+      // Old Hooks already encode prompt observation in their validated Turn ID.
+      // Trae has no native message clock; these remain observation timestamps.
+      const identity = parseTraeTurnId(command);
+      const userObservedAt = identity?.promptDigest === traePromptDigest(command.prompt)
+        ? parseNativeMessageTimestamp(identity.createdAt) : undefined;
       const traceContext = entry?.traceContext ?? traceContextFromTraeHookBody(command);
       const repositoryMemory = await memory.resolveRepositoryMemory(command);
       await recordCompletedTurn(traceContext, command, options, now);
@@ -129,6 +137,10 @@ export function createTraeMemoryHookRuntime(
         resolveRepositoryMemory: async () => repositoryMemory,
         userText: command.prompt,
         assistantText: command.lastAssistantMessage,
+        userTimestamp: userObservedAt,
+        userTimestampSource: "observed",
+        assistantTimestamp: assistantObservedAt,
+        assistantTimestampSource: "observed",
         traceContext,
       });
       await recordMaterializedTurn(traceContext, command, options);

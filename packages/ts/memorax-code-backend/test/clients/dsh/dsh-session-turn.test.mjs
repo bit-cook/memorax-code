@@ -16,11 +16,23 @@ test("DSH turn materialization accepts one exact native interval and excludes pl
       endSeq: 10,
       userPrompt: "Implement the DSH adapter.",
       assistantReply: "I will inspect.\n\nThe adapter is ready.",
+      userTimestamp: 1_700_000_000_001,
+      assistantTimestamp: 1_700_000_000_010,
       outcome: "completed",
     },
   });
   assert.equal(JSON.stringify(result).includes("recalled memory"), false);
   assert.equal(JSON.stringify(result).includes("private tool result"), false);
+
+  const withoutEndTime = dshTurnInterval({ cwd: CWD });
+  delete withoutEndTime.events.at(-1).time;
+  assert.equal(dshSessionEventTurn(withoutEndTime).turn.assistantTimestamp, 1_700_000_000_007);
+  delete withoutEndTime.events[1].time;
+  withoutEndTime.events[7].time = "not-a-time";
+  const withoutMessageTimes = dshSessionEventTurn(withoutEndTime);
+  assert.equal(withoutMessageTimes.ok, true);
+  assert.equal(withoutMessageTimes.turn.userTimestamp, undefined, "plugin recall is not a prompt time source");
+  assert.equal(withoutMessageTimes.turn.assistantTimestamp, undefined, "earlier assistant text cannot date the final reply");
 
   const ordinaryFork = dshTurnInterval({ cwd: CWD });
   ordinaryFork.sessionHeader.parentSession = "ordinary-parent";

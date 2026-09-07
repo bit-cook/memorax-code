@@ -309,6 +309,10 @@ test("Backend runs DSH Search, normalized Trace, and Add from one native Turn in
       { role: "user", content: "Implement the DSH adapter." },
       { role: "assistant", content: "I will inspect.\n\nThe adapter is ready." },
     ]);
+    assert.deepEqual(requests[1].body.messages.map(({ timestamp }) => timestamp), [
+      1_700_000_000_001,
+      1_700_000_000_010,
+    ]);
     assert.equal(JSON.stringify(requests[1].body).includes("recalled memory"), false);
     assert.equal(JSON.stringify(requests[1].body).includes("private tool result"), false);
 

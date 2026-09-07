@@ -266,6 +266,9 @@ memory-impact disclosure, then extracts and stores reusable memory. It
 does not upload the complete retained client trace artifact or local trace
 path.
 
+QA writeback preserves available native timestamps and labels observation-time
+fallbacks; see [message timestamps](docs/configuration.md#automatic-writeback-timestamps).
+
 Sign in to [MemoraX Console](https://platform.memorax.net/) at any time to view,
 edit, or delete saved memories. MemoraX Cloud does not receive model-provider
 credentials or local Backend tokens.

@@ -169,7 +169,13 @@ lives in the Claude adapter. The DSH adapter owns Profile discovery and
 mutation plus per-user runtime generation materialization. The OpenCode adapter
 installs an auto-discovered thin loader and shared skill without editing
 OpenCode provider configuration. The CodeBuddy adapter owns its marketplace
-plugin, while the Trae adapter merges only marker-owned Global Hooks and
+plugin and managed global `UserPromptSubmit` Hook. Native global Hooks load
+before plugin initialization, allowing the first prompt to use the same
+transcript-boundary and prompt-digest correlation as later turns. The plugin
+retains `SessionStart` and `Stop`; its old prompt dispatch is ignored to avoid
+duplicate handling during updates. The global entry honors native plugin
+disablement before Backend recovery, and lifecycle disable/remove cleans up
+only its owned Hook. The Trae adapter merges only marker-owned Global Hooks and
 materializes the shared Skill without changing provider settings. These
 implementations are loaded by their Backend lifecycle participants. Preserve
 the participant contract and each client's actual authority instead of forcing
@@ -532,6 +538,12 @@ content stops locally; accepted duplicates need not issue another Add request.
   flush; turn or size limits can trigger that flush during enqueue.
 - Buffering and chunking belong to the memory capability; rollout, transcript,
   DSH event-interval, and SDK message parsing remains client-specific.
+- Native materializers pass the selected QA timestamps through the shared
+  completion contract. The coordinator supplies explicitly labelled observations
+  when native times are absent; automatic enqueue freezes any remaining fallback
+  before buffering. Message timestamps and source labels survive redaction,
+  chunking, and retries. Provider Add metadata carries only the aligned time-source
+  labels, not local trace context. See [timestamp semantics](docs/configuration.md#automatic-writeback-timestamps).
 - DSH accepts only a contiguous native interval bounded by the matching
   `turn/start` and completed `turn/end`. The Backend materializes direct user
   text and visible model-assistant text; plugin recall, tools, reasoning, and
@@ -558,6 +570,8 @@ content stops locally; accepted duplicates need not issue another Add request.
   the paired `Stop` assistant text. The Backend rejects commands naming a
   replaced Turn while its active/interruption state remains available. A
   complete validated Hook command can restore writeback after Backend restart.
+  The validated Turn ID retains the prompt observation time; optional
+  `assistantObservedAt` preserves the Stop Hook observation across HTTP delivery.
   The adapter pairs native `Stop` with its persisted active record; it does not
   independently validate a native Stop Turn ID. An old Stop arriving after
   that record is replaced therefore is not guaranteed to be rejected. Missing

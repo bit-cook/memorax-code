@@ -195,8 +195,8 @@ test("CodeBuddy runtime writes back the uniquely materialized provisional turn",
   const prompt = "persist this turn";
   const turnId = provisionalTurnId(sessionId, prompt);
   await writeFile(transcriptPath, lines([
-    { id: "u-native", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: prompt }] },
-    { id: "a-native", type: "message", role: "assistant", parentId: "u-native", status: "completed", content: [{ type: "output_text", text: "persisted reply" }] },
+    { id: "u-native", type: "message", role: "user", sessionId, timestamp: 1_700_000_000_000, content: [{ type: "input_text", text: prompt }] },
+    { id: "a-native", type: "message", role: "assistant", parentId: "u-native", status: "completed", timestamp: 1_700_000_060_000, content: [{ type: "output_text", text: "persisted reply" }] },
   ]));
   const writes = [];
   const runtime = createCodeBuddyMemoryHookRuntime({
@@ -215,6 +215,8 @@ test("CodeBuddy runtime writes back the uniquely materialized provisional turn",
     assert.equal(writes.length, 1);
     assert.equal(writes[0].userText, prompt);
     assert.equal(writes[0].assistantText, "persisted reply");
+    assert.equal(writes[0].userTimestamp, 1_700_000_000_000);
+    assert.equal(writes[0].assistantTimestamp, 1_700_000_060_000);
   } finally {
     runtime.close();
   }

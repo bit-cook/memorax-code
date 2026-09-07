@@ -154,6 +154,8 @@ export function createDshMemoryHookRuntime(
         }),
         userText: materialized.turn.userPrompt,
         assistantText: materialized.turn.assistantReply,
+        userTimestamp: materialized.turn.userTimestamp,
+        assistantTimestamp: materialized.turn.assistantTimestamp,
         traceContext,
       });
       if (!writeback.scheduled) {

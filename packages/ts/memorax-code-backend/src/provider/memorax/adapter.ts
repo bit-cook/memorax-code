@@ -27,6 +27,7 @@ import {
 } from "../../repository/scope.js";
 import type { TraceContext } from "../../trace/context.js";
 import { isRecord } from "../../shared/record.js";
+import { parseNativeMessageTimestamp } from "../../shared/message-time.js";
 
 const SLOT_RESULT_SCHEMA_VERSION = "slot-invocation-result.preview.v1";
 const FORWARDED_WRITEBACK_METADATA_KEYS = [
@@ -105,6 +106,13 @@ type MemoraxAddPayload = {
   metadata: Record<string, unknown>;
   async_mode: true;
   timestamp: number;
+};
+
+type MemoraxWritebackMessage = {
+  role: "user" | "assistant";
+  content: string;
+  timestamp?: number;
+  timestampSource?: "native" | "observed";
 };
 
 type MemoraxRunContext = {
@@ -309,12 +317,12 @@ async function invokeMemoraxWriteback(
 ): Promise<MemoraxInvocationResult> {
   const env = options.env ?? process.env;
   const context = isRecord(request.context) ? request.context : {};
-  const messages = writebackMessagesFromContext(context, request.content);
+  const addOptions = memoraxAddOptionsFromContext(context, env);
+  if (!addOptions.ok) return { ok: false, error: addOptions.error };
+  const messages = writebackMessagesFromContext(context, request.content, addOptions.options);
   if (messages.length === 0) return { ok: false, error: "writeback messages are required" };
   const idempotencyKey = writebackIdempotencyKeyFromContext(context);
   if (!idempotencyKey) return { ok: false, error: "writeback idempotency key is required" };
-  const addOptions = memoraxAddOptionsFromContext(context, env);
-  if (!addOptions.ok) return { ok: false, error: addOptions.error };
   const payload = buildMemoraxAddPayload(config, run, messages, context, idempotencyKey, repositoryScope, addOptions.options);
   try {
     const { body: raw, quota } = await callMemoAdd(config, payload, options.fetchImpl);
@@ -370,7 +378,7 @@ async function invokeMemoraxWriteback(
 function buildMemoraxAddPayload(
   config: MemoraxAdapterConfig,
   run: MemoraxRunContext,
-  messages: Array<{ role: "user" | "assistant"; content: string; timestamp?: number }>,
+  messages: MemoraxWritebackMessage[],
   context: Record<string, unknown>,
   idempotencyKey: string,
   repositoryScope: RepositoryMemoryScope,
@@ -381,14 +389,13 @@ function buildMemoraxAddPayload(
   const chunk = options.contentType === "code" && options.mode === "default"
     ? writebackChunkFromContext(context)
     : undefined;
-  let lastTimestamp = 0;
-  const stamped = messages.map((message, index) => {
-    let timestamp = Number.isFinite(message.timestamp) ? Number(message.timestamp) : now + index;
-    if (timestamp < 10_000_000_000) timestamp = now + index;
-    if (timestamp <= lastTimestamp) timestamp = lastTimestamp + 1;
-    lastTimestamp = timestamp;
-    return { role: message.role, content: message.content, timestamp };
-  });
+  // Preserve caller times exactly, including equal fragment timestamps and
+  // out-of-order arrival. Array order and chunk indexes already express order.
+  const stamped = messages.map((message, index) => ({
+    role: message.role,
+    content: message.content,
+    timestamp: parseNativeMessageTimestamp(message.timestamp) ?? now + index,
+  }));
   const scopeKind = repositoryMemoryScopeKind(repositoryScope);
   return {
     messages: stamped,
@@ -405,6 +412,9 @@ function buildMemoraxAddPayload(
       source: "memorax-code",
       tags: ["memorax-code"],
       ...extraMetadata,
+      ...(messages.some((message) => message.timestampSource) ? {
+        memorax_code_timestamp_sources: messages.map((message) => message.timestampSource ?? "unspecified"),
+      } : {}),
       memorax_code_memory_scope: memoraxScopeVersion(scopeKind),
       memorax_code_base_user_id: repositoryScope.baseUserId,
       memorax_code_workspace: repositoryScope.repositorySlug,
@@ -466,23 +476,36 @@ function repositoryScopeForConfig(
 function writebackMessagesFromContext(
   context: Record<string, unknown>,
   fallbackContent: unknown,
-): Array<{ role: "user" | "assistant"; content: string; timestamp?: number }> {
+  options: MemoraxAddOptions,
+): MemoraxWritebackMessage[] {
+  const preserveWhitespace = options.contentType === "code" && options.mode === "default"
+    && writebackChunkFromContext(context) !== undefined;
   const rawMessages = Array.isArray(context.messages) ? context.messages : [];
   const messages = rawMessages
-    .map((message) => normalizeWritebackMessage(message))
-    .filter((message): message is { role: "user" | "assistant"; content: string; timestamp?: number } => Boolean(message));
+    .map((message) => normalizeWritebackMessage(message, preserveWhitespace))
+    .filter((message): message is MemoraxWritebackMessage => Boolean(message));
   if (messages.length > 0) return messages;
   const content = typeof fallbackContent === "string" ? fallbackContent.trim() : "";
   return content ? [{ role: "assistant", content }] : [];
 }
 
-function normalizeWritebackMessage(value: unknown): { role: "user" | "assistant"; content: string; timestamp?: number } | undefined {
+function normalizeWritebackMessage(value: unknown, preserveWhitespace: boolean): MemoraxWritebackMessage | undefined {
   if (!isRecord(value)) return undefined;
   const role = value.role === "user" || value.role === "assistant" ? value.role : undefined;
-  const content = typeof value.content === "string" ? value.content.trim() : "";
+  const rawContent = typeof value.content === "string" ? value.content : "";
+  // Complete messages were normalized before chunking. A fragment's boundary
+  // whitespace, including a whitespace-only fragment, belongs to that message.
+  const content = preserveWhitespace ? rawContent : rawContent.trim();
   if (!role || !content) return undefined;
-  const timestamp = typeof value.timestamp === "number" && Number.isFinite(value.timestamp) ? value.timestamp : undefined;
-  return { role, content, ...(timestamp === undefined ? {} : { timestamp }) };
+  const timestamp = typeof value.timestamp === "number" ? parseNativeMessageTimestamp(value.timestamp) : undefined;
+  const timestampSource = value.timestampSource === "native" || value.timestampSource === "observed"
+    ? (timestamp === undefined ? "observed" : value.timestampSource)
+    : undefined;
+  return {
+    role, content,
+    ...(timestamp === undefined ? {} : { timestamp }),
+    ...(timestampSource === undefined ? {} : { timestampSource }),
+  };
 }
 
 function renderMemoraxContextBlocks(items: unknown[], config: MemoraxAdapterConfig): MemoraxContextBlock[] {

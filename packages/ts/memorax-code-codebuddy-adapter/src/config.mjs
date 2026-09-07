@@ -7,7 +7,11 @@ import { resolveHookCodeBuddyCommand } from "../../memorax-code-adapter-common/s
 import { withJsonFileLockAsync } from "../../memorax-code-adapter-common/src/config-utils.mjs";
 import {
   codeBuddyHookManifestConfigured,
+  codeBuddyUserPromptHookCommand,
+  codeBuddyUserPromptHookConfigured,
+  hasManagedCodeBuddyUserPromptHook,
   materializeCodeBuddyHookManifest,
+  updateCodeBuddyUserPromptHook,
 } from "./hook-manifest.mjs";
 import {
   codeBuddyRuntimeObservationPath,
@@ -72,6 +76,7 @@ export async function enableCodeBuddyAdapter(options = {}) {
   await updateSettings(home, (settings) => {
     settings.enabledPlugins = recordValue(settings.enabledPlugins);
     settings.enabledPlugins[PLUGIN_ID] = true;
+    updateCodeBuddyUserPromptHook(settings, codeBuddyUserPromptHookCommand(localPluginPath, platform));
   });
   await updateLegacyRegistry(home, { installPath, enabled: true });
   await removeLegacyManagedInstallation(home, platform);
@@ -111,7 +116,8 @@ export async function readCodeBuddyAdapterStatus(options = {}) {
   const legacyHome = legacyCodeBuddyHome(home, platform);
   const legacyManaged = legacyHome ? await managedCodeBuddyInstallationExists(legacyHome) : false;
   const hookConfigured = installedRoots.length > 0
-    && (await Promise.all(installedRoots.map((root) => codeBuddyHookManifestConfigured(root, platform)))).every(Boolean);
+    && (await Promise.all(installedRoots.map((root) => codeBuddyHookManifestConfigured(root, platform)))).every(Boolean)
+    && codeBuddyUserPromptHookConfigured(settings, codeBuddyUserPromptHookCommand(localPluginPath, platform), enabled);
   const observation = await readCodeBuddyRuntimeObservation(memoraxCodeHome);
   const runtimeObserved = hookConfigured && observationMatches(observation, home, platform);
   return { ok: true, action: "status", runtime: "codebuddy", integration: "hooks", installed, enabled, managed: installed && marketplaceReady, codeBuddyHome: home, installPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID, marketplaceReady, legacyCodeBuddyHome: legacyManaged ? legacyHome : undefined, legacyManaged, codebuddyHooks: { ok: hookConfigured, configured: hookConfigured, runtimeObserved, status: hookConfigured ? (runtimeObserved ? "observed" : "unverified") : "invalid", observationPath: codeBuddyRuntimeObservationPath(memoraxCodeHome) }, codebuddySkills: { ok: skillInstalled, status: skillInstalled ? "installed" : "missing", managed: skillInstalled, memoraxCode: skillInstalled, path: skillPath } };
@@ -130,6 +136,7 @@ async function disableManagedCodeBuddyInstallation(home) {
   await updateSettings(home, (settings) => {
     settings.enabledPlugins = recordValue(settings.enabledPlugins);
     settings.enabledPlugins[PLUGIN_ID] = false;
+    updateCodeBuddyUserPromptHook(settings);
   });
   await updateLegacyRegistry(home, { installPath: codeBuddyInstallPath(home), enabled: false });
 }
@@ -144,6 +151,7 @@ async function removeManagedCodeBuddyInstallation(home) {
   await updateJsonRecordIfPresent(codeBuddySettingsPath(home), (settings) => {
     settings.enabledPlugins = recordValue(settings.enabledPlugins);
     delete settings.enabledPlugins[PLUGIN_ID];
+    updateCodeBuddyUserPromptHook(settings);
   });
   await updateJsonRecordIfPresent(knownMarketplacesPath(home), (known) => {
     delete known[MARKETPLACE_NAME];
@@ -167,6 +175,7 @@ async function managedCodeBuddyInstallationExists(home) {
   const known = await readJsonRecord(knownMarketplacesPath(home));
   const registry = await readJsonRecord(installedRegistryPath(home));
   return Object.hasOwn(recordValue(settings.enabledPlugins), PLUGIN_ID)
+    || hasManagedCodeBuddyUserPromptHook(settings)
     || Object.hasOwn(known, MARKETPLACE_NAME)
     || Object.hasOwn(recordValue(registry.plugins), PLUGIN_ID);
 }

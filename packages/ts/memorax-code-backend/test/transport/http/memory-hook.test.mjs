@@ -123,6 +123,11 @@ test("Backend memory hook endpoints record and write back a turn", async () => {
     assert.equal(traeWriteback.status, 200);
     assert.deepEqual(await traeWriteback.json(), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 2, "HTTP Hook writebacks did not call MemoraX add");
+    const codexAdd = requests.find((request) => request.body.session_id === "session-http").body;
+    assert.deepEqual(codexAdd.messages.map((message) => message.timestamp), [
+      Date.parse("2026-07-16T00:00:02.000Z"), Date.parse("2026-07-16T00:00:03.000Z"),
+    ]);
+    assert.deepEqual(codexAdd.metadata.memorax_code_timestamp_sources, ["native", "native"]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     globalThis.fetch = originalFetch;

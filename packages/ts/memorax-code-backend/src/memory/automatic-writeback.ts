@@ -38,10 +38,18 @@ import {
   type MemoryPayloadRedactionKind,
 } from "./payload-redaction.js";
 import type { MemoraxQuotaSnapshot } from "../provider/memorax/quota.js";
+import { parseNativeMessageTimestamp } from "../shared/message-time.js";
 
 export type AutomaticMemoryWritebackClient = "codex" | "claude-code" | "opencode" | "dsh" | "codebuddy" | "trae";
 
-export type AutomaticMemoryWritebackOptions = {
+export type AutomaticMemoryWritebackTiming = {
+  userTimestamp?: number;
+  assistantTimestamp?: number;
+  userTimestampSource?: "native" | "observed";
+  assistantTimestampSource?: "native" | "observed";
+};
+
+export type AutomaticMemoryWritebackOptions = AutomaticMemoryWritebackTiming & {
   client: AutomaticMemoryWritebackClient;
   sessionKey?: string;
   userText?: string;
@@ -295,14 +303,27 @@ function automaticMemoryWritebackDecision(
 
   const idempotencyKey = `automatic:${options.client}:${hashText(options.repositoryScope.effectiveUserId)}:${sessionKey}:${hashText(userText)}:${hashText(assistantText)}`;
   if (hasPendingWriteback(state, idempotencyKey)) return { write: false, skipReason: "duplicate_pending" };
+  // Freeze missing-time observations before buffering or retries. Upload time
+  // must never replace a native message time or pretend to be one.
+  const observedAt = Date.now();
+  const userTimestamp = parseNativeMessageTimestamp(options.userTimestamp);
+  const assistantTimestamp = parseNativeMessageTimestamp(options.assistantTimestamp);
   return {
     write: true,
     client: options.client,
     sessionKey,
     idempotencyKey,
     messages: [
-      { role: "user", content: userText },
-      { role: "assistant", content: assistantText },
+      {
+        role: "user", content: userText,
+        timestamp: userTimestamp ?? observedAt,
+        timestampSource: userTimestamp === undefined ? "observed" : options.userTimestampSource ?? "native",
+      },
+      {
+        role: "assistant", content: assistantText,
+        timestamp: assistantTimestamp ?? observedAt,
+        timestampSource: assistantTimestamp === undefined ? "observed" : options.assistantTimestampSource ?? "native",
+      },
     ],
   };
 }

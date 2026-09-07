@@ -174,6 +174,8 @@ export function createClaudeMemoryHookRuntime(
         }),
         userText: transcript.turn.userPrompt,
         assistantText: transcript.turn.assistantReply,
+        userTimestamp: transcript.turn.userTimestamp,
+        assistantTimestamp: transcript.turn.assistantTimestamp,
         traceContext,
       });
       if (!writeback.scheduled) {

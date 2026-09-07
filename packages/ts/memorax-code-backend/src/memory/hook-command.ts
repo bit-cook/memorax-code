@@ -1,4 +1,5 @@
 import { isRecord } from "../shared/record.js";
+import { parseNativeMessageTimestamp } from "../shared/message-time.js";
 import { codeBuddyPromptDigest, parseCodeBuddyTurnId } from "../clients/codebuddy/turn-id.js";
 import { parseTraeTurnId, traePromptDigest } from "../clients/trae/turn-id.js";
 
@@ -48,7 +49,7 @@ const WRITEBACK_KEYS: Readonly<Record<MemoryHookClient, ReadonlySet<string>>> = 
     "events",
   ]),
   codebuddy: new Set([...BASE_COMMAND_KEYS, "turnId", "transcriptPath"]),
-  trae: new Set([...BASE_COMMAND_KEYS, "turnId", "prompt", "lastAssistantMessage"]),
+  trae: new Set([...BASE_COMMAND_KEYS, "turnId", "prompt", "lastAssistantMessage", "assistantObservedAt"]),
 };
 const SKILL_REMINDER_KEYS: Readonly<Record<MemoryHookClient, ReadonlySet<string>>> = {
   codex: new Set([...BASE_COMMAND_KEYS, "turnId", "transcriptPath", "content", "triggers"]),
@@ -153,6 +154,7 @@ export type TraeWritebackCommand = MemoryHookCommandBase<"trae"> & Readonly<{
   turnId: string;
   prompt: string;
   lastAssistantMessage: string;
+  assistantObservedAt?: number;
 }>;
 
 export type WritebackCommand =
@@ -360,7 +362,15 @@ export function parseWritebackCommand(
     if (!turnId || !prompt || !lastAssistantMessage || !validTraeTurnId(turnId, base.sessionId, prompt)) {
       return invalidCommand();
     }
-    return { ok: true, command: { ...base, client: "trae", turnId, prompt, lastAssistantMessage } };
+    const assistantObservedAt = typeof value.assistantObservedAt === "number"
+      ? parseNativeMessageTimestamp(value.assistantObservedAt) : undefined;
+    if (value.assistantObservedAt !== undefined && assistantObservedAt === undefined) {
+      return invalidCommand();
+    }
+    return { ok: true, command: {
+      ...base, client: "trae", turnId, prompt, lastAssistantMessage,
+      ...(assistantObservedAt === undefined ? {} : { assistantObservedAt }),
+    } };
   }
   const lastAssistantMessage = requiredStringField(value, "lastAssistantMessage");
   if (!lastAssistantMessage) return invalidCommand();

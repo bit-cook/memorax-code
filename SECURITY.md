@@ -171,6 +171,11 @@ OpenCode SDK session-message Turn, or Trae's validated Hook pair. It does not
 send the retained trace file, raw transcript path, raw DSH interval, SDK
 message records, or trace-only provenance as part of that payload.
 
+Automatic QA writeback also sends the selected native message/event timestamps
+or explicitly labelled local observation times. An aligned source-label array
+in Add metadata distinguishes them; it contains no transcript paths or trace
+identifiers. See [timestamp semantics](docs/configuration.md#automatic-writeback-timestamps).
+
 Automatic writeback bounds each selected message to its configured Add limit,
 then applies a local best-effort detector before hashing, buffering, chunking,
 observability, or network dispatch. Recognized private keys, authorization

@@ -47,8 +47,11 @@ test("Claude Hook returns the Backend-authorized Git worktree", async () => {
   }
 });
 
-test("Claude Hook writeback uses exact transcript content", async () => {
-  const fixture = await transcriptFixture("Materialized prompt.", "Materialized answer.");
+test("Claude Hook writeback uses exact transcript content and native times", async () => {
+  const fixture = await transcriptFixture("Materialized prompt.", "Materialized answer.", {
+    userTimestamp: "2026-09-01T08:00:00.000Z",
+    assistantRecords: [{ ...assistantRecord("Materialized answer."), timestamp: "2026-09-01T08:03:00.000Z" }],
+  });
   const writebacks = [];
   const diagnostics = [];
   const runtime = createClaudeMemoryHookRuntime({
@@ -74,6 +77,8 @@ test("Claude Hook writeback uses exact transcript content", async () => {
     assert.equal(writebacks.length, 1);
     assert.equal(writebacks[0].userText, "Materialized prompt.");
     assert.equal(writebacks[0].assistantText, "Materialized answer.");
+    assert.equal(writebacks[0].userTimestamp, Date.parse("2026-09-01T08:00:00.000Z"));
+    assert.equal(writebacks[0].assistantTimestamp, Date.parse("2026-09-01T08:03:00.000Z"));
     assert.equal(writebacks[0].client, "claude-code");
     assert.equal(writebacks[0].memoryObservabilitySource, "claude_hook_writeback");
     assert.equal(writebacks[0].repositoryScope, SCOPE);
@@ -785,12 +790,12 @@ function turnStart(transcriptPath, promptId = PROMPT_ID) {
 async function transcriptFixture(
   userPrompt,
   assistantReply,
-  { promptId = PROMPT_ID, assistantRecords } = {},
+  { promptId = PROMPT_ID, assistantRecords, userTimestamp } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-claude-hook-transcript-"));
   const path = join(root, "transcript.jsonl");
   await writeFile(path, [
-    JSON.stringify(userRecord(userPrompt, promptId)),
+    JSON.stringify({ ...userRecord(userPrompt, promptId), timestamp: userTimestamp }),
     ...(assistantRecords ?? [assistantRecord(assistantReply)])
       .map((record) => JSON.stringify(record)),
     "",

@@ -10,13 +10,13 @@ import {
 const sessionId = "session-1";
 test("extracts hidden user query and completed assistant branch", () => {
   const lines = [
-    { id: "u1", type: "message", role: "user", sessionId, content: [
+    { id: "u1", type: "message", role: "user", sessionId, timestamp: "2026-09-07T08:00:00+08:00", content: [
       { type: "output_text", text: "<user_query>ignore this block</user_query>" },
       { type: "input_text", text: "<system-reminder>hidden</system-reminder><user_query>remember this</user_query>" },
     ] },
     { id: "c1", type: "function_call", role: "assistant", parentId: "u1", name: "Bash", arguments: "{}" },
     { id: "r1", type: "function_call_result", parentId: "c1", output: "ok" },
-    { id: "a1", type: "message", role: "assistant", parentId: "r1", status: "completed", content: [
+    { id: "a1", type: "message", role: "assistant", parentId: "r1", status: "completed", timestamp: "2026-09-07T00:05:00.000Z", content: [
       { type: "input_text", text: "ignore this block" },
       { type: "output_text", text: "done" },
     ] },
@@ -25,6 +25,8 @@ test("extracts hidden user query and completed assistant branch", () => {
   assert.equal(result.ok, true);
   assert.equal(result.turn.userPrompt, "remember this");
   assert.equal(result.turn.assistantReply, "done");
+  assert.equal(result.turn.userTimestamp, Date.parse("2026-09-07T00:00:00.000Z"));
+  assert.equal(result.turn.assistantTimestamp, Date.parse("2026-09-07T00:05:00.000Z"));
 });
 
 test("preserves completed and interrupted replies through a long tool chain", () => {
@@ -53,6 +55,8 @@ test("preserves completed and interrupted replies through a long tool chain", ()
   assert.equal(completed.ok, true);
   assert.equal(completed.turn.userPrompt, "long task");
   assert.equal(completed.turn.assistantReply, "done");
+  assert.equal(completed.turn.userTimestamp, undefined);
+  assert.equal(completed.turn.assistantTimestamp, undefined);
   assert.equal(completed.turn.activities.length, callCount * 2);
 
   assistant.status = "incomplete";
@@ -173,12 +177,12 @@ test("fails closed on two completed branches", () => {
 
 test("uses the provisional transcript boundary for repeated prompts", () => {
   const first = [
-    { id: "u1", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: "repeat" }] },
-    { id: "a1", type: "message", role: "assistant", parentId: "u1", status: "completed", content: [{ type: "output_text", text: "first" }] },
+    { id: "u1", type: "message", role: "user", sessionId, timestamp: 1_700_000_000_000, content: [{ type: "input_text", text: "repeat" }] },
+    { id: "a1", type: "message", role: "assistant", parentId: "u1", status: "completed", timestamp: 1_700_000_060_000, content: [{ type: "output_text", text: "first" }] },
   ].map(JSON.stringify).join("\n") + "\n";
   const second = [
-    { id: "u2", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: "repeat" }] },
-    { id: "a2", type: "message", role: "assistant", parentId: "u2", status: "completed", content: [{ type: "output_text", text: "second" }] },
+    { id: "u2", type: "message", role: "user", sessionId, timestamp: 1_700_000_300_000, content: [{ type: "input_text", text: "repeat" }] },
+    { id: "a2", type: "message", role: "assistant", parentId: "u2", status: "completed", timestamp: 1_700_000_420_000, content: [{ type: "output_text", text: "second" }] },
   ].map(JSON.stringify).join("\n") + "\n";
   const result = codeBuddyTranscriptTurnFromJsonLines(first + second, {
     sessionId,
@@ -186,6 +190,8 @@ test("uses the provisional transcript boundary for repeated prompts", () => {
   });
   assert.equal(result.ok, true);
   assert.equal(result.turn.assistantReply, "second");
+  assert.equal(result.turn.userTimestamp, 1_700_000_300_000);
+  assert.equal(result.turn.assistantTimestamp, 1_700_000_420_000);
 });
 
 test("does not accept session-less user records when session markers exist", () => {
@@ -229,20 +235,27 @@ test("fails closed on malformed JSONL instead of using a partial transcript", ()
 });
 
 test("uses UTF-8 byte boundaries when a repeated prompt follows non-ASCII history", () => {
-  const first = [
-    { id: "u1", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: "重复" }] },
-    { id: "a1", type: "message", role: "assistant", parentId: "u1", status: "completed", content: [{ type: "output_text", text: "第一轮" }] },
-  ].map(JSON.stringify).join("\n") + "\n";
-  const second = [
-    { id: "u2", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: "重复" }] },
-    { id: "a2", type: "message", role: "assistant", parentId: "u2", status: "completed", content: [{ type: "output_text", text: "第二轮" }] },
-  ].map(JSON.stringify).join("\n") + "\n";
-  const result = codeBuddyTranscriptTurnFromJsonLines(first + second, {
-    sessionId,
-    turnId: provisionalTurnId("重复", Buffer.byteLength(first, "utf8")),
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.turn.assistantReply, "第二轮");
+  for (const newline of ["\n", "\r\n"]) {
+    const first = [
+      { id: "u1", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: "重复" }] },
+      { id: "a1", type: "message", role: "assistant", parentId: "u1", status: "completed", content: [{ type: "output_text", text: "第一轮" }] },
+    ].map(JSON.stringify).join(newline) + newline;
+    const second = [
+      { id: "u2", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: "重复" }] },
+      { id: "a2", type: "message", role: "assistant", parentId: "u2", status: "completed", content: [{ type: "output_text", text: "第二轮" }] },
+    ].map(JSON.stringify).join(newline) + newline;
+    const boundary = Buffer.byteLength(first, "utf8");
+    const result = codeBuddyTranscriptTurnFromJsonLines(first + second, {
+      sessionId,
+      turnId: provisionalTurnId("重复", boundary),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.turn.assistantReply, "第二轮");
+    assert.deepEqual(codeBuddyTranscriptTurnFromJsonLines(first + second, {
+      sessionId,
+      turnId: provisionalTurnId("重复", boundary + 1),
+    }), { ok: false, reason: "user_prompt_missing" }, "records before the exact byte boundary must stay excluded");
+  }
 });
 
 test("rejects a prompt materialized before the provisional boundary", () => {

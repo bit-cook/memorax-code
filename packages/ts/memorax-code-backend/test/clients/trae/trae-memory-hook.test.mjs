@@ -5,15 +5,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createTraeMemoryHookRuntime } from "../../../dist/clients/trae/memory-hook-runtime.js";
+import { parseWritebackCommand } from "../../../dist/memory/hook-command.js";
 import { createRepositoryMemorySessionRuntime } from "../../../dist/memory/repository-session.js";
 import { traeTracePaths } from "../../../dist/trace/config.js";
 
 test("Trae runtime writes exact Hook content once for a repeated completed Turn", async () => {
   const fixture = await createFixture("exact-writeback");
   const requests = [];
+  const userObservedAt = 1_700_000_000_000;
+  const assistantObservedAt = userObservedAt + 120_000;
   const runtime = createTraeMemoryHookRuntime({
     env: configuredEnv(fixture.home, { MEMORAX_CODE_TRAE_TRACE_ENABLED: "false" }),
     fetchImpl: memoraxFetch(requests),
+    now: () => assistantObservedAt + 60_000,
   });
   const prompt = "  Preserve this Trae prompt exactly.  ";
   const assistant = "  Preserve this Trae response exactly.  ";
@@ -23,14 +27,20 @@ test("Trae runtime writes exact Hook content once for a repeated completed Turn"
     const writeback = {
       ...command,
       lastAssistantMessage: assistant,
+      assistantObservedAt,
     };
-    assert.deepEqual(await runtime.writeback(writeback), { ok: true, scheduled: true });
+    const parsed = parseWritebackCommand(writeback);
+    assert.equal(parsed.ok, true);
+    assert.deepEqual(parsed.command, writeback);
+    assert.deepEqual(await runtime.writeback(parsed.command), { ok: true, scheduled: true });
     assert.deepEqual(await runtime.writeback(writeback), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 1, "Trae writeback did not settle");
     assert.deepEqual(requests[0].body.messages.map(({ role, content }) => ({ role, content })), [
       { role: "user", content: prompt.trim() },
       { role: "assistant", content: assistant.trim() },
     ]);
+    assert.deepEqual(requests[0].body.messages.map(({ timestamp }) => timestamp), [userObservedAt, assistantObservedAt]);
+    assert.deepEqual(requests[0].body.metadata.memorax_code_timestamp_sources, ["observed", "observed"]);
     assert.match(requests[0].body.metadata.idempotency_key, /^automatic:trae:/);
   } finally {
     runtime.close();
@@ -317,6 +327,7 @@ test("Trae complete Hook payload restores writeback after Backend runtime restar
   const writes = [];
   const afterRestart = createTraeMemoryHookRuntime({
     env,
+    now: () => 1_700_000_180_000,
     automaticWriteback: (request) => {
       writes.push(request);
       return { accepted: true };
@@ -332,6 +343,10 @@ test("Trae complete Hook payload restores writeback after Backend runtime restar
       userText: command.prompt,
       assistantText: "The complete Stop payload restored the turn.",
     }]);
+    assert.equal(writes[0].userTimestamp, 1_700_000_000_000);
+    assert.equal(writes[0].assistantTimestamp, 1_700_000_180_000);
+    assert.equal(writes[0].userTimestampSource, "observed");
+    assert.equal(writes[0].assistantTimestampSource, "observed");
   } finally {
     afterRestart.close();
     await fixture.cleanup();

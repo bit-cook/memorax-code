@@ -222,6 +222,8 @@ MemoraX Code 会先比较含义：语义相同的请求不重复写入；长期�
 选择的用户指令和对应的 Agent 最终回复，并先移除最终回复中的记忆作用说明，再用于提取和保存记忆；它不会上传完整的本地客户端 trace
 文件或本地 trace 路径。
 
+QA 写回会保留可用的原生时间戳，并标明使用观测时间的回退情况，详见[消息时间戳](docs/configuration.md#automatic-writeback-timestamps)。
+
 登录 [MemoraX Console](https://platform.memorax.net/) 后，可以随时查看、修改或删除已经保存的记忆。
 MemoraX 云端不会接收模型服务商凭据或本地 Backend Token。
 
