@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ import {
   codeBuddySettingsPath,
   codeBuddyInstallPath,
 } from "../src/config.mjs";
-import { codeBuddyHookCommand } from "../src/hook-manifest.mjs";
+import { codeBuddyHookCommand, codeBuddyUserPromptHookCommand } from "../src/hook-manifest.mjs";
 import { writeCodeBuddyRuntimeObservation } from "../src/runtime-observation.mjs";
 import { resolveHookCodeBuddyCommand } from "../../memorax-code-adapter-common/src/clients/codebuddy-command.mjs";
 
@@ -53,6 +54,20 @@ test("builds a native Windows Hook command without the WorkBuddy root placeholde
     codeBuddyHookCommand("C:\\Users\\tester\\.codebuddy\\plugins\\memorax", "win32"),
     'node "C:/Users/tester/.codebuddy/plugins/memorax/hooks/runtime-hook.mjs" turn',
   );
+  assert.equal(
+    codeBuddyUserPromptHookCommand("C:\\Users\\Test User\\.workbuddy\\plugins\\memorax", "win32"),
+    'node "C:/Users/Test User/.workbuddy/plugins/memorax/hooks/runtime-hook.mjs" managed-user-prompt',
+  );
+});
+
+test("quotes the absolute global Hook path for a POSIX shell", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-quoted-"));
+  const pluginRoot = join(root, "user's space $home", "memorax-code-codebuddy-adapter");
+  await mkdir(join(pluginRoot, "hooks"), { recursive: true });
+  await writeFile(join(pluginRoot, "hooks", "runtime-hook.mjs"), "process.stdout.write(process.argv[2]);\n");
+  const result = spawnSync("/bin/sh", ["-c", codeBuddyUserPromptHookCommand(pluginRoot)], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "managed-user-prompt");
 });
 
 test("finds WorkBuddy's bare Windows CLI for Repo Memory jobs", () => {
@@ -99,6 +114,15 @@ test("installs and removes an isolated CodeBuddy plugin registry entry", async (
   await mkdir(join(home, "plugins"), { recursive: true });
   await mkdir(join(home, "skills", "user-skill"), { recursive: true });
   await writeFile(join(home, "skills", "user-skill", "SKILL.md"), "user-owned\n");
+  const userPromptGroup = { matcher: "*", hooks: [
+    { type: "command", command: "echo user-prompt" },
+    { type: "command", command: "echo managed-user-prompt" },
+  ] };
+  const userSessionStart = [{ hooks: [{ type: "command", command: "echo user-session" }] }];
+  await writeFile(codeBuddySettingsPath(home), JSON.stringify({ hooks: {
+    SessionStart: userSessionStart,
+    UserPromptSubmit: [userPromptGroup, { hooks: [{ type: "command", command: codeBuddyUserPromptHookCommand("/old/memorax-code-codebuddy-adapter") }] }],
+  } }));
   await writeFile(join(home, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: {
     "user-plugin@user-marketplace": [{ scope: "user", installPath: "/user/plugin", enabled: true }],
   }}));
@@ -134,10 +158,12 @@ test("installs and removes an isolated CodeBuddy plugin registry entry", async (
   const pluginRoot = join(marketplaceRoot(home), "plugins", "memorax-code-codebuddy-adapter");
   const hooksManifest = JSON.parse(await readFile(join(pluginRoot, "hooks", "hooks.json"), "utf8"));
   const expectedHookCommand = codeBuddyHookCommand(pluginRoot, "win32");
-  for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+  for (const event of ["SessionStart", "Stop"]) {
     assert.equal(hooksManifest.hooks[event][0].hooks[0].command, expectedHookCommand);
     assert.doesNotMatch(hooksManifest.hooks[event][0].hooks[0].command, /CODEBUDDY_PLUGIN_ROOT/);
   }
+  assert.equal(hooksManifest.hooks.UserPromptSubmit, undefined);
+  const expectedPromptCommand = codeBuddyUserPromptHookCommand(pluginRoot, "win32");
   await writeCodeBuddyRuntimeObservation({
     memoraxCodeHome,
     codeBuddyHome: home,
@@ -154,13 +180,30 @@ test("installs and removes an isolated CodeBuddy plugin registry entry", async (
   assert.equal(known["memorax-code-local"].type, "directory");
   const settings = JSON.parse(await readFile(codeBuddySettingsPath(home), "utf8"));
   assert.equal(settings.enabledPlugins["memorax-code-codebuddy-adapter@memorax-code-local"], true);
+  assert.deepEqual(settings.hooks, {
+    SessionStart: userSessionStart,
+    UserPromptSubmit: [userPromptGroup, { hooks: [{ type: "command", command: expectedPromptCommand, timeout: 15 }] }],
+  });
+  // Same-version installs replace both old plugin copies and keep one global prompt Hook.
+  for (const installedRoot of [pluginRoot, codeBuddyInstallPath(home)]) {
+    const oldManifest = JSON.parse(await readFile(join(installedRoot, "hooks", "hooks.json"), "utf8"));
+    oldManifest.hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: codeBuddyHookCommand(installedRoot, "win32") }] }];
+    await writeFile(join(installedRoot, "hooks", "hooks.json"), JSON.stringify(oldManifest));
+  }
+  await enableCodeBuddyAdapter({ codeBuddyHome: home, platform: "win32" });
+  assert.deepEqual(JSON.parse(await readFile(codeBuddySettingsPath(home), "utf8")).hooks, settings.hooks);
+  for (const installedRoot of [pluginRoot, codeBuddyInstallPath(home)]) {
+    assert.equal(JSON.parse(await readFile(join(installedRoot, "hooks", "hooks.json"), "utf8")).hooks.UserPromptSubmit, undefined);
+  }
   await disableCodeBuddyAdapter({ codeBuddyHome: home });
-  const disabledStatus = await readCodeBuddyAdapterStatus({ codeBuddyHome: home });
+  const disabledStatus = await readCodeBuddyAdapterStatus({ codeBuddyHome: home, platform: "win32" });
   assert.equal(disabledStatus.enabled, false);
+  assert.equal(disabledStatus.codebuddyHooks.ok, true);
   assert.equal(disabledStatus.marketplaceReady, true);
   assert.equal(disabledStatus.codebuddySkills.ok, true);
   const disabledSettings = JSON.parse(await readFile(codeBuddySettingsPath(home), "utf8"));
   assert.equal(disabledSettings.enabledPlugins["memorax-code-codebuddy-adapter@memorax-code-local"], false);
+  assert.deepEqual(disabledSettings.hooks, { SessionStart: userSessionStart, UserPromptSubmit: [userPromptGroup] });
   await removeCodeBuddyPluginInstallation({ codeBuddyHome: home });
   const removedStatus = await readCodeBuddyAdapterStatus({ codeBuddyHome: home });
   assert.equal(removedStatus.installed, false);
@@ -170,6 +213,7 @@ test("installs and removes an isolated CodeBuddy plugin registry entry", async (
   assert.equal(removedKnown["memorax-code-local"], undefined);
   const removedSettings = JSON.parse(await readFile(codeBuddySettingsPath(home), "utf8"));
   assert.equal(removedSettings.enabledPlugins["memorax-code-codebuddy-adapter@memorax-code-local"], undefined);
+  assert.deepEqual(removedSettings.hooks, disabledSettings.hooks);
   const removedRegistry = JSON.parse(await readFile(join(home, "plugins", "installed_plugins.json"), "utf8"));
   assert.ok(removedRegistry.plugins["user-plugin@user-marketplace"]);
   assert.equal(await exists(marketplaceRoot(home)), false);
@@ -213,6 +257,7 @@ test("reconciles a managed legacy .codebuddy home when .workbuddy is selected", 
   assert.equal(disabled.legacyCodeBuddyHome, legacyHome);
   const disabledLegacySettings = JSON.parse(await readFile(codeBuddySettingsPath(legacyHome), "utf8"));
   assert.equal(disabledLegacySettings.enabledPlugins["memorax-code-codebuddy-adapter@memorax-code-local"], false);
+  assert.equal(disabledLegacySettings.hooks.UserPromptSubmit, undefined);
 
   await enableCodeBuddyAdapter({
     codeBuddyHome: workBuddyHome,
@@ -225,6 +270,7 @@ test("reconciles a managed legacy .codebuddy home when .workbuddy is selected", 
   const migratedLegacySettings = JSON.parse(await readFile(codeBuddySettingsPath(legacyHome), "utf8"));
   assert.equal(migratedLegacySettings.enabledPlugins["memorax-code-codebuddy-adapter@memorax-code-local"], undefined);
   assert.equal(migratedLegacySettings.enabledPlugins["user-plugin@user-marketplace"], true);
+  assert.equal(migratedLegacySettings.hooks.UserPromptSubmit, undefined);
   const migratedLegacyKnown = JSON.parse(await readFile(knownMarketplacesPath(legacyHome), "utf8"));
   assert.equal(migratedLegacyKnown["memorax-code-local"], undefined);
   assert.ok(migratedLegacyKnown["user-marketplace"]);
@@ -244,6 +290,8 @@ test("reconciles a managed legacy .codebuddy home when .workbuddy is selected", 
   const removedLegacyRegistry = JSON.parse(await readFile(join(legacyHome, "plugins", "installed_plugins.json"), "utf8"));
   assert.equal(removedLegacyRegistry.plugins["memorax-code-codebuddy-adapter@memorax-code-local"], undefined);
   assert.ok(removedLegacyRegistry.plugins["user-plugin@user-marketplace"]);
+  assert.equal(JSON.parse(await readFile(codeBuddySettingsPath(legacyHome), "utf8")).hooks.UserPromptSubmit, undefined);
+  assert.equal(JSON.parse(await readFile(codeBuddySettingsPath(workBuddyHome), "utf8")).hooks.UserPromptSubmit, undefined);
 });
 
 test("installs the complete plugin when the package lives under node_modules", async () => {
@@ -277,7 +325,7 @@ test("installs the complete plugin when the package lives under node_modules", a
   }
 });
 
-test("status rejects a Windows plugin that still uses the portable root placeholder", async () => {
+test("status rejects stale plugin and global prompt Hook configurations", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-invalid-hook-"));
   const home = join(root, "codebuddy-home");
   await enableCodeBuddyAdapter({
@@ -291,16 +339,37 @@ test("status rejects a Windows plugin that still uses the portable root placehol
   manifest.hooks.SessionStart[0].hooks[0].command = 'node "${CODEBUDDY_PLUGIN_ROOT}/hooks/runtime-hook.mjs" turn';
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-  const status = await readCodeBuddyAdapterStatus({
-    codeBuddyHome: home,
-    memoraxCodeHome: join(root, "memorax-code-home"),
-    platform: "win32",
-  });
-  assert.equal(status.codebuddyHooks.ok, false);
-  assert.equal(status.codebuddyHooks.status, "invalid");
+  await assertInvalid();
+
+  manifest.hooks.SessionStart[0].hooks[0].command = codeBuddyHookCommand(pluginRoot, "win32");
+  manifest.hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: codeBuddyHookCommand(pluginRoot, "win32") }] }];
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await assertInvalid();
+
+  delete manifest.hooks.UserPromptSubmit;
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  const settings = JSON.parse(await readFile(codeBuddySettingsPath(home), "utf8"));
+  settings.hooks.UserPromptSubmit = [];
+  await writeFile(codeBuddySettingsPath(home), JSON.stringify(settings));
+  await assertInvalid();
+
+  settings.hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: codeBuddyUserPromptHookCommand(pluginRoot, "win32") }] }];
+  settings.hooks.UserPromptSubmit.push(settings.hooks.UserPromptSubmit[0]);
+  await writeFile(codeBuddySettingsPath(home), JSON.stringify(settings));
+  await assertInvalid();
+
+  async function assertInvalid() {
+    const status = await readCodeBuddyAdapterStatus({
+      codeBuddyHome: home,
+      memoraxCodeHome: join(root, "memorax-code-home"),
+      platform: "win32",
+    });
+    assert.equal(status.codebuddyHooks.ok, false);
+    assert.equal(status.codebuddyHooks.status, "invalid");
+  }
 });
 
-test("disable and remove are no-ops for an uninstalled CodeBuddy home", async () => {
+test("leaves an uninstalled home untouched and removes an orphaned managed global Hook", async () => {
   const home = await mkdtemp(join(tmpdir(), "memorax-codebuddy-empty-"));
   const disabled = await disableCodeBuddyAdapter({ codeBuddyHome: home });
   assert.equal(disabled.installed, false);
@@ -308,6 +377,13 @@ test("disable and remove are no-ops for an uninstalled CodeBuddy home", async ()
   const removed = await removeCodeBuddyPluginInstallation({ codeBuddyHome: home });
   assert.equal(removed.removed, false);
   assert.equal(await exists(join(home, "plugins", "installed_plugins.json")), false);
+  const userGroup = { hooks: [{ type: "command", command: "echo user-prompt" }] };
+  await writeFile(codeBuddySettingsPath(home), JSON.stringify({ hooks: { UserPromptSubmit: [
+    userGroup,
+    { hooks: [{ type: "command", command: codeBuddyUserPromptHookCommand(join(home, "memorax-code-codebuddy-adapter")) }] },
+  ] } }));
+  assert.equal((await removeCodeBuddyPluginInstallation({ codeBuddyHome: home })).removed, true);
+  assert.deepEqual(JSON.parse(await readFile(codeBuddySettingsPath(home), "utf8")).hooks.UserPromptSubmit, [userGroup]);
 });
 
 test("malformed CodeBuddy registry fails closed", async () => {
@@ -315,6 +391,11 @@ test("malformed CodeBuddy registry fails closed", async () => {
   await mkdir(join(home, "plugins"), { recursive: true });
   await writeFile(join(home, "plugins", "installed_plugins.json"), "not-json\n");
   await assert.rejects(() => enableCodeBuddyAdapter({ codeBuddyHome: home }), /JSON|Unexpected token/);
+  const otherHome = await mkdtemp(join(tmpdir(), "memorax-codebuddy-malformed-hooks-"));
+  const settings = { hooks: { UserPromptSubmit: "malformed" } };
+  await writeFile(codeBuddySettingsPath(otherHome), JSON.stringify(settings));
+  await assert.rejects(() => enableCodeBuddyAdapter({ codeBuddyHome: otherHome }), /invalid CodeBuddy UserPromptSubmit Hook settings/);
+  assert.deepEqual(JSON.parse(await readFile(codeBuddySettingsPath(otherHome), "utf8")), settings);
 });
 
 test("recovers an abandoned legacy registry lock without losing user plugins", async () => {

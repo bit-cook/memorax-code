@@ -64,6 +64,13 @@ const invalidFields = {
       ["prompt-mismatched turn id", { prompt: "Different prompt." }],
       ["missing assistant authority", { lastAssistantMessage: " " }],
       ["foreign message authority", { messages: [] }],
+      ["non-finite assistant observation", { assistantObservedAt: Number.NaN }],
+      ["infinite assistant observation", { assistantObservedAt: Number.POSITIVE_INFINITY }],
+      ["out-of-range assistant observation", { assistantObservedAt: 8_640_000_000_000_001 }],
+      ["fractional assistant observation", { assistantObservedAt: 1_700_000_000_000.5 }],
+      ["epoch-second assistant observation", { assistantObservedAt: 1_700_000_000 }],
+      ["string assistant observation", { assistantObservedAt: "1700000000000" }],
+      ["null assistant observation", { assistantObservedAt: null }],
     ],
   },
 };

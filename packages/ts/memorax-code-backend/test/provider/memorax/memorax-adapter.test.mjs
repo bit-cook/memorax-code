@@ -432,7 +432,7 @@ test("MemoraX adapter maps writeback to /v1/memories/add and keeps trace provena
           idempotencyKey: "session-1:branch-1:action-1",
           messages: [
             { role: "user", content: "remember this", timestamp: 1777392000000 },
-            { role: "assistant", content: "noted", timestamp: 1777392000001 },
+            { role: "assistant", content: "noted", timestamp: 1777391999000 },
           ],
           transcriptPath: localPathSentinel,
           traceContext,
@@ -486,6 +486,8 @@ test("MemoraX adapter maps writeback to /v1/memories/add and keeps trace provena
       ["user", "remember this"],
       ["assistant", "noted"],
     ]);
+    assert.deepEqual(requests[0].body.messages.map((message) => message.timestamp), [1777392000000, 1777391999000]);
+    assert.equal("memorax_code_timestamp_sources" in requests[0].body.metadata, false);
     assert.equal(requests[0].body.metadata.source, "memorax-code");
     assert.equal(requests[0].body.metadata.memorax_code_memory_scope, "repository-name.v1");
     assert.equal(requests[0].body.metadata.memorax_code_base_user_id, "user-1");
@@ -768,6 +770,36 @@ for (const [phase, operation] of [["headers", "query"], ["body", "writeback"]]) 
     assert.equal(result.httpStatus, undefined);
   });
 }
+
+test("MemoraX adapter rejects blank messages outside valid default code fragments", async () => {
+  for (const context of [
+    {},
+    { contentType: "code", mode: "default", chunk: { group_id: "chunk", index: 2, count: 2 } },
+    { contentType: "code", mode: "raw", chunk: { group_id: "chunk", index: 0, count: 2 } },
+  ]) {
+    const result = await invokeMemoraxMemoryProvider(
+      { sessionId: "blank-writeback", prompt: "" },
+      {
+        operation: "writeback",
+        context: {
+          ...context,
+          idempotencyKey: "blank-writeback",
+          messages: [{ role: "assistant", content: " \r\n\t " }],
+        },
+      },
+      {
+        env: {
+          MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
+          MEMORAX_CODE_MEMORAX_API_KEY: "secret",
+          MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
+        },
+        repositoryScope: testRepositoryScope(),
+        fetchImpl: async () => { throw new Error("blank content must not reach HTTP"); },
+      },
+    );
+    assert.deepEqual(result, { ok: false, error: "writeback messages are required" });
+  }
+});
 
 test("MemoraX adapter preserves prebuilt code evidence packs", async () => {
   const requests = [];

@@ -210,6 +210,8 @@ export function createCodexMemoryHookRuntime(options: CodexMemoryHookRuntimeOpti
         ),
         userText: rollout.turn.userPrompt,
         assistantText: rollout.turn.assistantReply,
+        userTimestamp: rollout.turn.userTimestamp,
+        assistantTimestamp: rollout.turn.assistantTimestamp,
         traceContext,
       });
       if (!writeback.scheduled) {

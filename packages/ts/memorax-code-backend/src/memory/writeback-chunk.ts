@@ -9,6 +9,8 @@ const CODE_CHUNK_GROUP_ID_PREFIX = "memory-writeback-chunk:v1:";
 export type WritebackMessage = {
   role: "user" | "assistant";
   content: string;
+  timestamp?: number;
+  timestampSource?: "native" | "observed";
 };
 
 export type MemoryWritebackAddPart = {
@@ -135,8 +137,8 @@ function chunkWritebackMessage(
   config: { maxChars: number; overlapRatio: number },
 ): WritebackMessage[] {
   return splitTextWithOverlap(message.content, config.maxChars, config.overlapRatio)
-    .map((content) => ({ role: message.role, content }))
-    .filter((part) => part.content.trim());
+    .map((content) => ({ ...message, content }))
+    .filter((part) => part.content.length > 0);
 }
 
 function splitTextWithOverlap(text: string, maxChars: number, overlapRatio: number): string[] {

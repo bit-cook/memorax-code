@@ -36,6 +36,7 @@ test("automatic memory writeback accepts and redacts a normalized completed turn
       sessionKey: "session-automatic-normalized",
       userText: `${userPrefix}${crossingToken}${"x".repeat(1_000_001)}`,
       assistantText: `Use the credential store; password=${password}`,
+      userTimestamp: 1788000000000,
       repositoryScope: REPOSITORY_SCOPE,
       env: {
         ...WRITEBACK_ENV,
@@ -56,6 +57,8 @@ test("automatic memory writeback accepts and redacts a normalized completed turn
     assert.equal(JSON.stringify(requests[0]).includes("ghp_C"), false);
     assert.equal(JSON.stringify(requests[0]).includes(password), false);
     assert.equal(requests[0].body.user_id, "user-1@automatic-memory-tests");
+    assert.equal(requests[0].body.messages[0].timestamp, 1788000000000);
+    assert.deepEqual(requests[0].body.metadata.memorax_code_timestamp_sources, ["native", "observed"]);
     assert.match(
       requests[0].body.metadata.idempotency_key,
       /^automatic:codex:[a-f0-9]{16}:session-automatic-normalized:/,
@@ -336,6 +339,8 @@ test("automatic memory writeback retries a retryable provider failure", async (t
         assert.deepEqual(events.map((event) => event.request.attempt), [1, 2]);
         assert.equal(events.every((event) => event.source === "claude_hook_writeback"), true);
         assert.equal(requests[0].body.metadata.idempotency_key, requests[1].body.metadata.idempotency_key);
+        assert.deepEqual(requests[0].body, requests[1].body, "retries must not restamp fallback observations");
+        assert.deepEqual(requests[0].body.metadata.memorax_code_timestamp_sources, ["observed", "observed"]);
       } finally {
         runtime.close();
       }
@@ -423,15 +428,17 @@ test("automatic memory writeback buffers normalized turns until the turn limit",
     MEMORAX_CODE_MEMORY_WRITEBACK_BUFFER_MAX_AGE_MS: "60000",
   };
   try {
-    for (const [userText, assistantText] of [
-      ["First buffered prompt.", "First buffered answer."],
-      ["Second buffered prompt.", "Second buffered answer."],
+    for (const [userText, assistantText, userTimestamp, assistantTimestamp] of [
+      ["First buffered prompt.", "First buffered answer.", 1788000000000, 1788000300000],
+      ["Second buffered prompt.", "Second buffered answer.", 1788000900000, 1788001200000],
     ]) {
       runtime.enqueue({
         client: "codex",
         sessionKey: "session-automatic-buffer",
         userText,
         assistantText,
+        userTimestamp,
+        assistantTimestamp,
         repositoryScope: REPOSITORY_SCOPE,
         env,
         fetchImpl: memoraxFetch(requests),
@@ -445,6 +452,10 @@ test("automatic memory writeback buffers normalized turns until the turn limit",
       "Second buffered prompt.",
       "Second buffered answer.",
     ]);
+    assert.deepEqual(requests[0].body.messages.map((message) => message.timestamp), [
+      1788000000000, 1788000300000, 1788000900000, 1788001200000,
+    ]);
+    assert.deepEqual(requests[0].body.metadata.memorax_code_timestamp_sources, ["native", "native", "native", "native"]);
   } finally {
     runtime.close();
   }
@@ -509,6 +520,8 @@ test("automatic memory writeback validates a normalized long decimal before chun
       sessionKey: "session-automatic-chunk",
       userText: "Summarize",
       assistantText: "123456789.6059746146202087",
+      userTimestamp: 1788000300000,
+      assistantTimestamp: 1788000300000,
       repositoryScope: REPOSITORY_SCOPE,
       env: {
         ...WRITEBACK_ENV,
@@ -528,6 +541,67 @@ test("automatic memory writeback validates a normalized long decimal before chun
       ["9.60597461"],
       ["6146202087"],
     ]);
+    assert.deepEqual(requests.map((request) => request.body.messages.map((message) => message.timestamp)), [
+      [1788000300000, 1788000300000], [1788000300000], [1788000300000],
+    ]);
+    assert.deepEqual(requests.map((request) => request.body.metadata.memorax_code_timestamp_sources), [
+      ["native", "native"], ["native"], ["native"],
+    ]);
+  } finally {
+    runtime.close();
+  }
+});
+
+test("automatic memory writeback preserves fragment whitespace and timing through buffering and retry", async () => {
+  const requests = [];
+  const runtime = createAutomaticMemoryWritebackRuntime();
+  const texts = {
+    user: ["User prefix  \r\n ", " \t \n".repeat(4), "  user suffix."].join(""),
+    assistant: ["Assistant text \n", "\t \r\n".repeat(4), " final answer."].join(""),
+  };
+  const timestamp = 1788000400000;
+  try {
+    assert.deepEqual(runtime.enqueue({
+      client: "codex",
+      sessionKey: "session-fragment-whitespace",
+      userText: ` \t${texts.user}\n `,
+      assistantText: `\n${texts.assistant}\t `,
+      userTimestamp: timestamp,
+      assistantTimestamp: timestamp,
+      assistantTimestampSource: "observed",
+      repositoryScope: REPOSITORY_SCOPE,
+      env: {
+        ...WRITEBACK_ENV,
+        MEMORAX_CODE_MEMORY_WRITEBACK_BUFFER_ENABLED: "true",
+        MEMORAX_CODE_MEMORY_WRITEBACK_BUFFER_MAX_TURNS: "1",
+        MEMORAX_CODE_MEMORY_WRITEBACK_CHUNK_MAX_CHARS: "16",
+        MEMORAX_CODE_MEMORY_WRITEBACK_CHUNK_OVERLAP_RATIO: "0",
+      },
+      fetchImpl: async (url, init) => {
+        requests.push({ url: String(url), body: JSON.parse(init.body) });
+        return requests.length === 1
+          ? new Response("", { status: 503, headers: { "retry-after": "0" } })
+          : memoraxSuccessResponse("fragment-whitespace");
+      },
+    }), { accepted: true });
+    await runtime.drain();
+
+    assert.equal(requests.length, 6, "five logical parts plus one failed attempt must be sent");
+    assert.deepEqual(requests[0].body, requests[1].body);
+    const parts = requests.slice(1).map((request) => request.body);
+    assert.deepEqual(parts.map((part) => part.chunk.index), [0, 1, 2, 3, 4]);
+    assert.equal(parts.every((part) => part.chunk.count === 5), true);
+    for (const role of ["user", "assistant"]) {
+      const messages = parts.flatMap((part) => part.messages).filter((message) => message.role === role);
+      assert.equal(messages.map((message) => message.content).join(""), texts[role]);
+      assert.equal(messages.some((message) => message.content.length > 0 && !message.content.trim()), true);
+    }
+    for (const part of parts) {
+      assert.equal(part.messages.every((message) => message.content.length <= 16 && message.timestamp === timestamp), true);
+      assert.deepEqual(part.metadata.memorax_code_timestamp_sources, part.messages.map((message) => (
+        message.role === "user" ? "native" : "observed"
+      )));
+    }
   } finally {
     runtime.close();
   }

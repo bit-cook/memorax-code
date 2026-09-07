@@ -25,6 +25,8 @@ test("OpenCode SDK messages materialize only an exact completed normal turn", ()
       assistantMessageId: "assistant-1",
       userPrompt: "OpenCode user prompt.",
       assistantReply: "OpenCode assistant reply.",
+      userTimestamp: 1_700_000_000_000,
+      assistantTimestamp: 1_700_000_060_000,
       outcome: "completed",
     },
   });
@@ -56,6 +58,8 @@ test("OpenCode SDK messages materialize only an exact completed normal turn", ()
       assistantMessageId: "assistant-1",
       userPrompt: "OpenCode user prompt.",
       assistantReply: "",
+      userTimestamp: 1_700_000_000_000,
+      assistantTimestamp: 1_700_000_060_000,
       outcome: "interrupted",
     },
   });
@@ -91,6 +95,8 @@ test("OpenCode SDK messages materialize only an exact completed normal turn", ()
       assistantMessageId: "assistant-1",
       userPrompt: "OpenCode user prompt.",
       assistantReply: "",
+      userTimestamp: 1_700_000_000_000,
+      assistantTimestamp: 1_700_000_060_000,
       outcome: "interrupted",
     },
   });
@@ -110,6 +116,8 @@ test("OpenCode SDK messages materialize a completed compaction continuation as t
       assistantMessageId: "assistant-final",
       userPrompt: "OpenCode user prompt.",
       assistantReply: "OpenCode final reply.",
+      userTimestamp: 1_700_000_000_000,
+      assistantTimestamp: 1_700_000_300_000,
       outcome: "completed",
     },
   });
@@ -149,6 +157,8 @@ test("OpenCode SDK messages materialize a completed compaction continuation as t
       assistantMessageId: "assistant-final",
       userPrompt: "OpenCode user prompt.",
       assistantReply: "",
+      userTimestamp: 1_700_000_000_000,
+      assistantTimestamp: 1_700_000_300_000,
       outcome: "interrupted",
     },
   });
@@ -292,6 +302,10 @@ test("OpenCode runtime routes SDK content and carries write quota to the next pr
       { role: "user", content: "OpenCode user prompt." },
       { role: "assistant", content: "OpenCode assistant reply." },
     ]);
+    assert.deepEqual(requests[1].body.messages.map(({ timestamp }) => timestamp), [
+      1_700_000_000_000,
+      1_700_000_060_000,
+    ]);
 
     assert.deepEqual(await runtime.recordTurnStart({
       version: 1,
@@ -377,6 +391,8 @@ test("OpenCode SDK completion requires a prior scope binding but not unexpired t
     assert.equal(writebacks[0].client, "opencode");
     assert.equal(writebacks[0].userText, "OpenCode user prompt.");
     assert.equal(writebacks[0].assistantText, "OpenCode final reply.");
+    assert.equal(writebacks[0].userTimestamp, 1_700_000_000_000);
+    assert.equal(writebacks[0].assistantTimestamp, 1_700_000_300_000);
     assert.equal(writebacks[0].traceContext.turnId, "user-1");
     assert.equal(writebacks[0].memoryObservabilitySource, "opencode_plugin_writeback");
   } finally {
@@ -393,7 +409,7 @@ function openCodeMessages() {
         id: "user-1",
         sessionID: "session-1",
         role: "user",
-        time: { created: 1 },
+        time: { created: 1_700_000_000_000 },
       },
       parts: [textPart("user-1", "OpenCode user prompt.")],
     },
@@ -403,7 +419,7 @@ function openCodeMessages() {
         sessionID: "session-1",
         role: "assistant",
         parentID: "user-1",
-        time: { created: 2, completed: 3 },
+        time: { created: 1_700_000_001_000, completed: 1_700_000_060_000 },
       },
       parts: [textPart("assistant-1", "OpenCode assistant reply.")],
     },
@@ -419,7 +435,7 @@ function compactedOpenCodeMessages() {
         sessionID: "session-1",
         role: "assistant",
         parentID: "user-1",
-        time: { created: 2, completed: 3 },
+        time: { created: 1_700_000_001_000, completed: 1_700_000_060_000 },
       },
       parts: [],
     },
@@ -428,7 +444,7 @@ function compactedOpenCodeMessages() {
         id: "user-compaction",
         sessionID: "session-1",
         role: "user",
-        time: { created: 4 },
+        time: { created: 1_700_000_120_000 },
       },
       parts: [{
         ...part("compaction", "user-compaction"),
@@ -441,7 +457,7 @@ function compactedOpenCodeMessages() {
         id: "user-continuation",
         sessionID: "session-1",
         role: "user",
-        time: { created: 5 },
+        time: { created: 1_700_000_180_000 },
       },
       parts: [{
         ...textPart("user-continuation", "Continue."),
@@ -455,7 +471,7 @@ function compactedOpenCodeMessages() {
         sessionID: "session-1",
         role: "assistant",
         parentID: "user-continuation",
-        time: { created: 6, completed: 7 },
+        time: { created: 1_700_000_181_000, completed: 1_700_000_300_000 },
       },
       parts: [textPart("assistant-final", "OpenCode final reply.")],
     },

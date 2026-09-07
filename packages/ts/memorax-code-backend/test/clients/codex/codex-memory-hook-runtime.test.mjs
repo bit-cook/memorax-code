@@ -186,6 +186,10 @@ test("memory hook writeback accepts repeated authority metadata in the exact Cod
 
     assert.equal(requests[0].body.messages[0].content, "Remember this persisted Codex turn.");
     assert.equal(requests[0].body.messages[1].content, "Stored persisted Codex answer.");
+    assert.deepEqual(requests[0].body.messages.map((message) => message.timestamp), [
+      Date.parse("2026-07-16T00:00:02.000Z"),
+      Date.parse("2026-07-16T00:00:03.000Z"),
+    ]);
     assert.equal(requests[0].body.user_id, "user-1@memorax-code");
     assert.equal(requests[0].body.metadata.memorax_code_base_user_id, "user-1");
     assert.equal(requests[0].body.metadata.memorax_code_workspace, "memorax-code");

@@ -88,6 +88,32 @@ test("UserPromptSubmit posts turn-start, injects the skill reminder, and traces 
   } finally { await server.close(); }
 });
 
+test("managed prompt entry respects plugin disablement and rejects other events or legacy dispatch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-hook-"));
+  const requests = [];
+  const server = await startServer(requests, { ok: true });
+  try {
+    for (const fixture of [
+      { name: "disabled", pluginEnabled: false },
+      { name: "missing", pluginEnabled: null },
+      { name: "wrong-event", event: "SessionStart", mode: "managed-user-prompt" },
+      { name: "legacy-prompt", mode: "turn" },
+    ]) {
+      const home = join(root, fixture.name);
+      await mkdir(home, { recursive: true });
+      const result = await runHook({
+        hook_event_name: fixture.event ?? "UserPromptSubmit", session_id: "guarded-session",
+        transcript_path: join(home, "session.jsonl"), prompt: "do not start", cwd: home,
+      }, { root: home, server, ...fixture });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.deepEqual(requests, [], fixture.name);
+      await assert.rejects(readFile(join(home, "adapters", "codebuddy", "pending.json")), { code: "ENOENT" });
+      await assert.rejects(readFile(join(home, "adapters", "codebuddy", "runtime-observed.json")), { code: "ENOENT" });
+    }
+  } finally { await server.close(); }
+});
+
 test("UserPromptSubmit applies the configured reminder cadence to native turn identities", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-hook-"));
   const transcriptPath = join(root, "session.jsonl");
@@ -226,7 +252,7 @@ test("UserPromptSubmit retries reuse one deterministic pending turn and a new pr
   } finally { await server.close(); }
 });
 
-test("Stop posts writeback and clears only an accepted pending turn", async () => {
+test("a global prompt before plugin SessionStart writes back once at Stop", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-hook-"));
   const transcriptPath = join(root, "session.jsonl");
   await writeFile(transcriptPath, "");
@@ -240,6 +266,12 @@ test("Stop posts writeback and clears only an accepted pending turn", async () =
     assert.equal(start.status, 0);
     const pending = JSON.parse(await readFile(join(root, "adapters", "codebuddy", "pending.json"), "utf8"));
     const turnId = pending["session-2"].turnId;
+    const sessionStart = await runHook({
+      hook_event_name: "SessionStart", session_id: "session-2", transcript_path: transcriptPath,
+      source: "startup", cwd: root,
+    }, { root, server });
+    assert.equal(sessionStart.status, 0);
+    assert.deepEqual(JSON.parse(await readFile(join(root, "adapters", "codebuddy", "pending.json"), "utf8")), pending);
     await writeFile(transcriptPath, [
       JSON.stringify({ id: "u1", role: "user", sessionId: "session-2", content: "<user_query>hello</user_query>" }),
       JSON.stringify({ id: "a1", role: "assistant", parentId: "u1", status: "completed", content: "done" }), "",
@@ -250,6 +282,8 @@ test("Stop posts writeback and clears only an accepted pending turn", async () =
     assert.equal(stop.status, 0);
     assert.equal(requests.at(-1).path, "/memory/writeback");
     assert.equal(requests.at(-1).body.turnId, turnId);
+    assert.equal(requests.filter((request) => request.path === "/memory/turn-start").length, 1);
+    assert.equal(requests.filter((request) => request.path === "/memory/writeback").length, 1);
     assert.deepEqual(JSON.parse(await readFile(join(root, "adapters", "codebuddy", "pending.json"), "utf8")), {});
   } finally { await server.close(); }
 });
@@ -289,14 +323,22 @@ async function startServer(requests, response) {
   return server;
 }
 
-function runHook(input, { root, server, hookEnv = {} }) {
+async function runHook(input, { root, server, hookEnv = {}, pluginEnabled = true, mode }) {
   const address = server.address();
+  const codeBuddyHome = join(root, "workbuddy");
+  if (pluginEnabled !== null) {
+    await mkdir(codeBuddyHome, { recursive: true });
+    await writeFile(join(codeBuddyHome, "settings.json"), JSON.stringify({
+      enabledPlugins: { "memorax-code-codebuddy-adapter@memorax-code-local": pluginEnabled },
+    }));
+  }
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [hookPath], {
+    const child = spawn(process.execPath, [hookPath, mode ?? (input.hook_event_name === "UserPromptSubmit" ? "managed-user-prompt" : "turn")], {
       cwd: root,
       env: {
         ...process.env,
         CODEBUDDY_ENV_FILE: "",
+        CODEBUDDY_HOME: codeBuddyHome,
         MEMORAX_CODE_HOME: root,
         MEMORAX_CODE_BACKEND_URL: `http://127.0.0.1:${address.port}`,
         ...hookEnv,

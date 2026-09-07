@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { parseNativeMessageTimestamp } from "../../shared/message-time.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -32,6 +33,8 @@ export type CodexRolloutTurn = {
   turnId: string;
   userPrompt: string;
   assistantReply: string;
+  userTimestamp?: number;
+  assistantTimestamp?: number;
   activities: CodexTurnActivity[];
   usage?: CodexTurnTokenUsage;
 };
@@ -112,7 +115,11 @@ export function codexRolloutTurnFromJsonLines(
   if (!scan.assistantReply) return { ok: false, reason: "assistant_message_missing" };
   return {
     ok: true,
-    turn: rolloutTurnFromScan(scan, input, scan.userPrompt, scan.assistantReply),
+    turn: {
+      ...rolloutTurnFromScan(scan, input, scan.userPrompt, scan.assistantReply),
+      ...(scan.userTimestamp === undefined ? {} : { userTimestamp: scan.userTimestamp }),
+      ...(scan.assistantTimestamp === undefined ? {} : { assistantTimestamp: scan.assistantTimestamp }),
+    },
   };
 }
 
@@ -149,6 +156,8 @@ type CodexRolloutTurnScan = {
   turnMetadataMismatch: boolean;
   userPrompt?: string;
   assistantReply?: string;
+  userTimestamp?: number;
+  assistantTimestamp?: number;
   visibleAssistantMessages: string[];
   interrupted: boolean;
   interruptedAt?: string;
@@ -172,9 +181,14 @@ function scanCodexRolloutTurn(transcript: string, targetTurnId: string): CodexRo
   let turnMetadataMismatch = false;
   let userPrompt: string | undefined;
   let assistantReply: string | undefined;
+  let userTimestamp: number | undefined;
+  let assistantTimestamp: number | undefined;
+  let completedTimestamp: number | undefined;
   const visibleAssistantMessages: string[] = [];
   let responseItemUserPrompt: string | undefined;
   let responseItemAssistantReply: string | undefined;
+  let responseItemUserTimestamp: number | undefined;
+  let responseItemAssistantTimestamp: number | undefined;
   let interrupted = false;
   let interruptedAt: string | undefined;
   let rolledBack = false;
@@ -255,8 +269,10 @@ function scanCodexRolloutTurn(transcript: string, targetTurnId: string): CodexRo
             if (role === "user") {
               userMessageTurnIds.add(activeTurnId);
               responseItemUserPrompt = message;
+              responseItemUserTimestamp = parseNativeMessageTimestamp(record.timestamp);
             } else {
               responseItemAssistantReply = message;
+              responseItemAssistantTimestamp = parseNativeMessageTimestamp(record.timestamp);
             }
           }
         }
@@ -283,6 +299,7 @@ function scanCodexRolloutTurn(transcript: string, targetTurnId: string): CodexRo
       if (completedTurnId === targetTurnId) {
         targetSeen = true;
         assistantReply ??= nonBlankString(payload.last_agent_message) ?? nonBlankString(payload.lastAgentMessage);
+        completedTimestamp = parseNativeMessageTimestamp(record.timestamp);
       }
       if (completedTurnId && completedTurnId === activeTurnId) activeTurnId = undefined;
       continue;
@@ -320,7 +337,11 @@ function scanCodexRolloutTurn(transcript: string, targetTurnId: string): CodexRo
     if (eventType === "user_message") {
       if (activeTurnId) userMessageTurnIds.add(activeTurnId);
       if (activeTurnId !== targetTurnId) continue;
-      userPrompt = nonBlankString(payload.message) ?? userPrompt;
+      const message = nonBlankString(payload.message);
+      if (message) {
+        userPrompt = message;
+        userTimestamp = parseNativeMessageTimestamp(record.timestamp);
+      }
       continue;
     }
     if (activeTurnId !== targetTurnId) continue;
@@ -330,7 +351,10 @@ function scanCodexRolloutTurn(transcript: string, targetTurnId: string): CodexRo
       if (payload.phase === "commentary" || payload.phase === "final_answer") {
         visibleAssistantMessages.push(message);
       }
-      if (payload.phase === "final_answer") assistantReply = message;
+      if (payload.phase === "final_answer") {
+        assistantReply = message;
+        assistantTimestamp = parseNativeMessageTimestamp(record.timestamp);
+      }
     }
   }
 
@@ -345,6 +369,12 @@ function scanCodexRolloutTurn(transcript: string, targetTurnId: string): CodexRo
     // missing response-item text may use the matching Turn's legacy text.
     userPrompt: responseItemUserPrompt ?? userPrompt,
     assistantReply: responseItemAssistantReply ?? assistantReply,
+    // Text and time share the same record authority, even when that record has
+    // no usable time. An exact task_complete can date completion separately.
+    userTimestamp: responseItemUserPrompt === undefined ? userTimestamp : responseItemUserTimestamp,
+    assistantTimestamp: completedTimestamp ?? (responseItemAssistantReply === undefined
+      ? assistantTimestamp
+      : responseItemAssistantTimestamp),
     visibleAssistantMessages,
     interrupted,
     interruptedAt,

@@ -62,6 +62,7 @@ test("Trae Stop writes the matching Hook pair and clears only an accepted Turn",
       text_content: "validated final answer",
       cwd: fixture.root,
     };
+    const stopStartedAt = Date.now();
 
     for (const reply of [
       { status: 503, body: { ok: false } },
@@ -88,7 +89,13 @@ test("Trae Stop writes the matching Hook pair and clears only an accepted Turn",
       lastAssistantMessage: "validated final answer",
       cwd: fixture.root,
     };
-    assert.deepEqual(writebacks.map(({ body }) => body), Array(3).fill(expectedWriteback));
+    assert.equal(writebacks.length, 3);
+    for (const { body } of writebacks) {
+      const { assistantObservedAt, ...content } = body;
+      assert.deepEqual(content, expectedWriteback);
+      assert.ok(Number.isSafeInteger(assistantObservedAt));
+      assert.ok(assistantObservedAt >= stopStartedAt && assistantObservedAt <= Date.now());
+    }
     const turns = JSON.parse(await readFile(turnsPath, "utf8"));
     assert.deepEqual(turns.sessions, {});
   } finally {

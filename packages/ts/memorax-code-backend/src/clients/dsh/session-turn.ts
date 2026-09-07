@@ -1,4 +1,5 @@
 import { isRecord } from "../../shared/record.js";
+import { parseNativeMessageTimestamp } from "../../shared/message-time.js";
 
 export type DshSessionTurn = Readonly<{
   sessionId: string;
@@ -7,6 +8,8 @@ export type DshSessionTurn = Readonly<{
   endSeq: number;
   userPrompt: string;
   assistantReply: string;
+  userTimestamp?: number;
+  assistantTimestamp?: number;
   outcome: string;
 }>;
 
@@ -120,6 +123,9 @@ export function dshSessionEventTurn(input: DshSessionTurnInput): DshSessionTurnR
 
   const userParts: string[] = [];
   const assistantParts: string[] = [];
+  let userTimestamp: number | undefined;
+  let assistantTimestamp: number | undefined;
+  let completedTimestamp: number | undefined;
   let outcome: string | undefined;
 
   for (const [index, value] of input.events.entries()) {
@@ -164,6 +170,7 @@ export function dshSessionEventTurn(input: DshSessionTurnInput): DshSessionTurnR
         const reason = data && isRecord(data.reason) ? stringField(data.reason, "kind") : undefined;
         if (!reason) return { ok: false, reason: "event_invalid" };
         outcome = reason;
+        completedTimestamp = parseNativeMessageTimestamp(value.time);
         break;
       }
       case "user/message": {
@@ -180,7 +187,10 @@ export function dshSessionEventTurn(input: DshSessionTurnInput): DshSessionTurnR
           }
           const text = textContent(message.content);
           if (text === undefined) return { ok: false, reason: "event_invalid" };
-          if (text) userParts.push(text);
+          if (text) {
+            if (userParts.length === 0) userTimestamp = parseNativeMessageTimestamp(value.time);
+            userParts.push(text);
+          }
         }
         break;
       }
@@ -197,7 +207,10 @@ export function dshSessionEventTurn(input: DshSessionTurnInput): DshSessionTurnR
         ) return { ok: false, reason: "event_invalid" };
         const text = textContent(message.content);
         if (text === undefined) return { ok: false, reason: "event_invalid" };
-        if (text) assistantParts.push(text);
+        if (text) {
+          assistantParts.push(text);
+          assistantTimestamp = parseNativeMessageTimestamp(value.time);
+        }
         break;
       }
     }
@@ -213,6 +226,9 @@ export function dshSessionEventTurn(input: DshSessionTurnInput): DshSessionTurnR
   if (!userPrompt) return { ok: false, reason: "user_prompt_missing" };
   const assistantReply = assistantParts.join("\n\n").trim();
   if (!assistantReply) return { ok: false, reason: "assistant_message_missing" };
+  // Native turn/end marks completion of the merged reply. Older intervals
+  // without its time can only provide the last included assistant message time.
+  assistantTimestamp = completedTimestamp ?? assistantTimestamp;
   return {
     ok: true,
     turn: {
@@ -222,6 +238,8 @@ export function dshSessionEventTurn(input: DshSessionTurnInput): DshSessionTurnR
       endSeq: input.endSeq,
       userPrompt,
       assistantReply,
+      ...(userTimestamp !== undefined ? { userTimestamp } : {}),
+      ...(assistantTimestamp !== undefined ? { assistantTimestamp } : {}),
       outcome,
     },
   };

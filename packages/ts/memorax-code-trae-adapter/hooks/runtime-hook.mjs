@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeTraeRuntimeObservation } from "../src/runtime-observation.mjs";
 
+// Capture Stop arrival before Backend startup or any local/HTTP work can delay it.
+const hookObservedAt = Date.now();
 const runtimeRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const commonRoot = join(runtimeRoot, "memorax-code-adapter-common", "src");
 const { buildRepoProcedureMemoryContext } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-procedure-memory-context.mjs")).href);
@@ -151,6 +153,7 @@ if (event === "SessionStart") {
     turnId: activeTurn.turnId,
     prompt: activeTurn.prompt,
     lastAssistantMessage,
+    assistantObservedAt: hookObservedAt,
     cwd: activeTurn.cwd ?? stringValue(input.cwd),
     workspaceKind: activeTurn.workspaceKind,
   });

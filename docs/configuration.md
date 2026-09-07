@@ -276,13 +276,21 @@ for legacy CodeBuddy installations. When both homes exist, setup removes only th
 legacy MemoraX-managed plugin state from `.codebuddy`; other platforms use
 `~/.workbuddy`. The Skill is
 materialized from the canonical MemoraX Code Skill and is owned by the managed
-marketplace plugin; user files outside that plugin are not modified.
+marketplace plugin.
+
+Setup also merges a managed `UserPromptSubmit` Hook into
+`<CODEBUDDY_HOME>/settings.json`. It captures the first prompt even when the
+native plugin is still loading; `SessionStart` and `Stop` remain in the plugin.
+Other user Hooks and model settings are preserved. Stopping or removing the
+integration removes its global Hook, and manually disabling the native plugin
+also prevents that Hook from starting the Backend or collecting prompts.
 
 On Windows, setup writes destination-specific native Hook paths so PowerShell
 does not receive a `/c/Users/...` plugin path. `memorax-code-codebuddy status
 --json` reports `codebuddyHooks.status` as `unverified` until a real WorkBuddy
 Hook executes, `observed` afterward, and `invalid` when the installed Hook
-manifest or runtime is incomplete. Restart or refresh WorkBuddy after setup.
+manifest, managed prompt Hook, or runtime is incomplete. Restart or refresh
+WorkBuddy after setup.
 
 ## Trae integration paths
 
@@ -453,6 +461,39 @@ new CLI processes must inherit the override too. The controls apply to new
 write decisions. They do not cancel requests already sent or guarantee that
 previously buffered turns are discarded: graceful Backend shutdown can flush
 those turns. They also do not delete memories already stored in MemoraX.
+
+### Automatic writeback timestamps
+
+Automatic QA messages use epoch-millisecond timestamps from the matching
+native content records when available. The selected sources are:
+
+| Client | User time | Assistant time |
+| --- | --- | --- |
+| Codex | Selected rollout user record | Matching `task_complete` event, otherwise the selected final message record |
+| Claude Code | Selected transcript user record | Selected terminal assistant record |
+| DeepSeek Harness | First included native user-message event | Completed `turn/end` event, otherwise the last included assistant-message event |
+| OpenCode | Original SDK user `time.created` | Final SDK assistant `time.completed` |
+| CodeBuddy/WorkBuddy | Selected transcript user record, when supplied | Selected completed assistant record, when supplied |
+| Trae | Persisted prompt Hook observation | Stop Hook observation |
+
+A native record timestamp is not necessarily the exact UI submit or last-token
+time. Missing or invalid native timestamps use a known Turn-start observation
+for the user and a completion-processing observation for the assistant; when
+the start observation is unavailable, the user also uses completion processing.
+These fallback times are fixed before buffering and provider retries.
+
+Each automatic Add includes `metadata.memorax_code_timestamp_sources`, aligned
+with its `messages` array: `native` means a selected native record/event time,
+and `observed` means a local observation. Trae always uses `observed`. Explicit
+Add callers that do not supply source information leave this metadata absent;
+an unlabelled message in a mixed-source request is `unspecified`.
+
+Buffering, chunking, and retries preserve message times and their sources.
+Fragments of the same original message retain the same time; equal or
+out-of-order supplied timestamps are not rewritten to impose artificial order.
+An Add may contain multiple Turns, and one Turn may span multiple Adds. This
+does not add Session/Turn fields to Search or reconstruct timestamps missing
+from previously uploaded data.
 
 ### Automatic writeback redaction
 

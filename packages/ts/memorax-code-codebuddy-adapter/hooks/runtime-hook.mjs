@@ -45,6 +45,17 @@ const codeBuddyHome = commonStringValue(process.env.CODEBUDDY_HOME)
   ?? commonStringValue(input?.codebuddy_home)
   ?? commonStringValue(input?.codeBuddyHome)
   ?? defaultCodeBuddyHome();
+const managedPrompt = process.argv[2] === "managed-user-prompt";
+// Global prompt Hooks load before plugins on cold startup. Honor native plugin
+// disablement before observation or Backend recovery, and ignore old manifest
+// prompt dispatch so an upgrade cannot submit the same event twice.
+if (managedPrompt) {
+  const settings = await readRecord(join(codeBuddyHome, "settings.json"));
+  if (event !== "UserPromptSubmit"
+    || settings.enabledPlugins?.["memorax-code-codebuddy-adapter@memorax-code-local"] !== true) process.exit(0);
+} else if (event === "UserPromptSubmit") {
+  process.exit(0);
+}
 try {
   await writeCodeBuddyRuntimeObservation({ memoraxCodeHome: home, codeBuddyHome, pluginRoot });
 } catch (error) {

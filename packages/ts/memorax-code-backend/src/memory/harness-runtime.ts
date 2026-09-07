@@ -3,6 +3,7 @@ import {
   createAutomaticMemoryWritebackRuntime,
   type AutomaticMemoryWritebackEnqueue,
   type AutomaticMemoryWritebackRuntime,
+  type AutomaticMemoryWritebackTiming,
 } from "./automatic-writeback.js";
 import type { MemoryHookTurnStartResult } from "./hook-command.js";
 import type {
@@ -80,7 +81,7 @@ export type HarnessTurnStart = Omit<MemoryTurnStart, "client" | "clientTurnId" |
 
 // Only client-specific materializers may supply completion content. A terminal
 // Hook signal or a trace record alone does not establish this input.
-export type HarnessTurnCompletion = Readonly<{
+export type HarnessTurnCompletion = Readonly<AutomaticMemoryWritebackTiming & {
   sessionId: string;
   clientTurnId: string;
   metadata?: MemoryTurnState;
@@ -228,6 +229,10 @@ export function createHarnessMemoryRuntime(
         resolveRepositoryMemory: input.resolveRepositoryMemory,
         userText: input.userText,
         assistantText: input.assistantText,
+        userTimestamp: input.userTimestamp,
+        assistantTimestamp: input.assistantTimestamp,
+        userTimestampSource: input.userTimestampSource,
+        assistantTimestampSource: input.assistantTimestampSource,
         writeback: {
           client: definition.client,
           sessionKey: input.sessionId,

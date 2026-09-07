@@ -3,6 +3,7 @@ import type {
   AutomaticMemoryWritebackEnqueue,
   AutomaticMemoryWritebackOptions,
   AutomaticMemoryWritebackRejectionReason,
+  AutomaticMemoryWritebackTiming,
 } from "./automatic-writeback.js";
 import type { ConfiguredRepositoryMemoryResult } from "./repository-session.js";
 import {
@@ -12,6 +13,7 @@ import {
   type RepositoryMemoryScopeFailureReason,
 } from "../repository/scope.js";
 import type { TraceContext } from "../trace/context.js";
+import { parseNativeMessageTimestamp } from "../shared/message-time.js";
 
 export type MemoryTurnClient = AutomaticMemoryWritebackClient;
 
@@ -54,7 +56,7 @@ export type MemoryTurnWritebackResult =
     metadataDisposition: Exclude<MemoryTurnMetadataDisposition, "consumed">;
   };
 
-export type MemoryTurnCompletion = Readonly<{
+export type MemoryTurnCompletion = Readonly<AutomaticMemoryWritebackTiming & {
   key: MemoryTurnKey;
   metadata?: MemoryTurnState;
   resolveRepositoryMemory: () => Promise<ConfiguredRepositoryMemoryResult>;
@@ -148,6 +150,7 @@ export function createMemoryTurnCoordinator(options: MemoryTurnCoordinatorOption
       }
     },
     async completeMaterializedTurn(input) {
+      const observedAt = now();
       const reject = (
         reason: MemoryTurnWritebackSkipReason,
       ): MemoryTurnWritebackResult => ({
@@ -177,10 +180,21 @@ export function createMemoryTurnCoordinator(options: MemoryTurnCoordinatorOption
         }
         repositoryScope = currentScope;
       }
+      const userTimestamp = parseNativeMessageTimestamp(input.userTimestamp);
+      const assistantTimestamp = parseNativeMessageTimestamp(input.assistantTimestamp);
       const acceptance = options.automaticWriteback({
         ...input.writeback,
         userText: input.userText,
         assistantText: input.assistantText,
+        // Metadata.createdAt is a start observation, not native message time.
+        // Keep that distinction even when a legacy record has no timestamp.
+        userTimestamp: userTimestamp
+          ?? parseNativeMessageTimestamp(input.metadata?.createdAt) ?? observedAt,
+        assistantTimestamp: assistantTimestamp ?? observedAt,
+        userTimestampSource: userTimestamp === undefined
+          ? "observed" : input.userTimestampSource ?? "native",
+        assistantTimestampSource: assistantTimestamp === undefined
+          ? "observed" : input.assistantTimestampSource ?? "native",
         repositoryScope,
       });
       if (!acceptance.accepted) {
