@@ -285,7 +285,7 @@ function runClient(command, options) {
         timedOut = true;
         const terminated = terminateClient(child, "SIGTERM");
         // A broken or ignored CLI must not leave a detached job behind forever.
-        // The grace period is deliberately short and only targets this child.
+        // The grace period is deliberately short and targets this job's process tree.
         killHandle = setTimeout(() => {
           if (!settled) terminateClient(child, "SIGKILL");
         }, options.killGraceMs);

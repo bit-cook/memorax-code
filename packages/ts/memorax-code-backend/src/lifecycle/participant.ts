@@ -86,10 +86,16 @@ export type AdapterLifecycleBackendContext = AdapterLifecycleContext & Readonly<
   backendUrl: string;
 }>;
 
+// Mutating phases run under the caller's Backend lifecycle lock; participant
+// locks, when needed, are acquired inside it.
 export type AdapterLifecycleParticipant<RemoveReport> = Readonly<{
   status(context: AdapterLifecycleBackendContext): Promise<AdapterReport>;
+  // Native installation may already enable Hooks; this is not a pure staging phase.
   prepareEnable(context: AdapterLifecycleBackendContext): Promise<AdapterReport>;
+  // Start activates gated runtime authority after Backend readiness. Rollback
+  // can also use this phase to restore previously enabled authority.
   activate?(context: AdapterLifecycleContext): Promise<AdapterReport>;
+  // Suspend recovery authority before Backend shutdown while retaining artifacts.
   quiesce?(context: AdapterLifecycleContext): Promise<AdapterReport>;
   disable(context: AdapterLifecycleContext): Promise<AdapterReport>;
   remove(context: AdapterLifecycleContext): Promise<RemoveReport>;

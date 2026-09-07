@@ -52,6 +52,14 @@ export MEMORAX_CODE_AUTO_UPDATE=false
 
 package_version="$(node -e 'const fs = require("fs"); const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(pkg.version);' "$out_dir/memorax-code/package.json")"
 
+check_required_files() {
+  node --input-type=module - "$1" <<'NODE_REQUIRED_FILES'
+import { assertRequiredNpmPackageFiles } from "./scripts/npm-package-layout.mjs";
+await assertRequiredNpmPackageFiles(process.argv[2]);
+NODE_REQUIRED_FILES
+}
+check_required_files "$out_dir/memorax-code"
+
 python3 - <<'PY_STAGED_PACKAGE' "$out_dir/memorax-code" "packages/npm/memorax-code/shipped-docs.json"
 import json
 import sys
@@ -117,153 +125,6 @@ memorax_defaults = (
 assert 'MEMORAX_DEFAULT_BASE_URL = "https://platform.memorax.net"' in memorax_defaults
 assert 'MEMORAX_ACCOUNT_URL = "https://platform.memorax.net/"' in memorax_defaults
 assert 'MEMORAX_DEFAULT_MEMORY_OUTPUT_LANGUAGE = "zh"' in memorax_defaults
-for relative in [
-    "bin/memorax-code-npm-preinstall.mjs",
-    "bin/memorax-code-plugin-postinstall.mjs",
-    "bin/memorax-code-setup.mjs",
-    "lib/client-hook-runtime.mjs",
-    "lib/automatic-update.mjs",
-    "lib/dsh-plugin-install.mjs",
-    "lib/resolve-claude-command.mjs",
-    "lib/resolve-codex-command.mjs",
-    "lib/resolve-codebuddy-command.mjs",
-    "lib/vscode-extension-command.mjs",
-    "lib/npm-invocation.mjs",
-    "lib/package-transition.mjs",
-    "lib/setup-memory-preferences.mjs",
-    "lib/setup-reconcile.mjs",
-    "lib/trial-setup.mjs",
-    "lib/windows-cli-invocation.mjs",
-    "lib/windows-user-path.mjs",
-    "lib/memorax-code-adapter-common/src/backend-command.mjs",
-    "lib/memorax-code-adapter-common/src/backend-connection.mjs",
-    "lib/memorax-code-adapter-common/src/config-utils.mjs",
-    "lib/memorax-code-adapter-common/src/hooks/client-hook-launcher.mjs",
-    "lib/memorax-code-adapter-common/src/clients/codex-plugin-artifact.mjs",
-    "lib/memorax-code-adapter-common/src/clients/codebuddy-command.mjs",
-    "lib/memorax-code-adapter-common/src/hooks/hook-runtime-generation.mjs",
-    "lib/memorax-code-adapter-common/src/hooks/memory-skill-reminder-policy.mjs",
-    "lib/memorax-code-adapter-common/src/memorax-defaults.mjs",
-    "lib/memorax-code-adapter-common/src/runtime-record.mjs",
-    "lib/memorax-code-adapter-common/src/setup-completion.mjs",
-    "lib/memorax-code-adapter-common/src/automatic-update-state.mjs",
-    "lib/memorax-code-adapter-common/src/hooks/ensure-backend-runner.mjs",
-    "lib/memorax-code-adapter-common/src/clients/claude-command.mjs",
-    "lib/memorax-code-adapter-common/src/clients/codex-command.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-memory-auto-build.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-context.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-marker.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-procedure-memory-context.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-supervisor.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-worker.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-memory-update-policy-evaluator.mjs",
-    "lib/memorax-code-adapter-common/src/repo-memory/repo-memory-update-policy.mjs",
-    "lib/memorax-code-adapter-common/src/windows-cli-invocation.mjs",
-    "lib/memorax-code-backend/dist/clients/codex/plugin-hooks.js",
-    "lib/memorax-code-backend/dist/codex-adapter-lifecycle.js",
-    "lib/memorax-code-backend/dist/windows-cli-invocation.js",
-    "lib/memorax-code-backend/dist/memory/automatic-retrieval.js",
-    "lib/memorax-code-backend/dist/memory/service.js",
-    "lib/memorax-code-backend/dist/memory/turn-coordinator.js",
-    "lib/memorax-code-backend/dist/clients/claude/memory-hook-runtime.js",
-    "lib/memorax-code-backend/dist/clients/claude/transcript-turn.js",
-    "lib/memorax-code-codex-adapter/assets/composer-icon.png",
-    "lib/memorax-code-codex-adapter/assets/logo.png",
-    "lib/memorax-code-codex-adapter/hooks/hooks.json",
-    "lib/memorax-code-codex-adapter/hooks/runtime-hook.mjs",
-    "lib/memorax-code-codex-adapter/hooks/runtime-shell.json",
-    "lib/memorax-code-codex-adapter/runtime-hooks/memory-skill-reminder.mjs",
-    "lib/memorax-code-codex-adapter/runtime-hooks/memory-writeback.mjs",
-    "lib/memorax-code-codex-adapter/src/workspace-kind.mjs",
-    "lib/memorax-code-codex-adapter/skills/memorax-code/SKILL.md",
-    "lib/memorax-code-codex-adapter/skills/memorax-code/scripts/repo-memory.mjs",
-    "lib/memorax-code-codex-adapter/skills/memorax-code/scripts/user-profile-memory.mjs",
-    "lib/memorax-code-claude-adapter/hooks/hooks.json",
-    "lib/memorax-code-claude-adapter/hooks/runtime-hook.mjs",
-    "lib/memorax-code-claude-adapter/hooks/runtime-shell.json",
-    "lib/memorax-code-claude-adapter/hooks/repo-memory-job.mjs",
-    "lib/memorax-code-claude-adapter/runtime-hooks/memory-turn.mjs",
-    "lib/memorax-code-claude-adapter/skills/memorax-code/SKILL.md",
-    "lib/memorax-code-claude-adapter/skills/memorax-code/scripts/repo-memory.mjs",
-    "lib/memorax-code-claude-adapter/skills/memorax-code/scripts/user-profile-memory.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/hooks.json",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/runtime-hook.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/runtime-shell.json",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/repo-memory-job.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/runtime-hooks/memory-turn.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-command.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-connection.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/runtime-record.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/setup-completion.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/automatic-update-state.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/hooks/ensure-backend-runner.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/hooks/memory-skill-reminder-policy.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/repo-memory/repo-memory-auto-build.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/repo-memory/repo-procedure-memory-context.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/skills/memorax-code/SKILL.md",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/skills/memorax-code/scripts/repo-memory.mjs",
-    "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/skills/memorax-code/scripts/user-profile-memory.mjs",
-    "lib/memorax-code-dsh-adapter/package.json",
-    "lib/memorax-code-dsh-adapter/cordis.patch.yml",
-    "lib/memorax-code-dsh-adapter/src/index.mjs",
-    "lib/memorax-code-dsh-adapter/src/backend-client.mjs",
-    "lib/memorax-code-dsh-adapter/src/dsh-message.mjs",
-    "lib/memorax-code-dsh-adapter/src/dsh-version.mjs",
-    "lib/memorax-code-dsh-adapter/src/http-client.mjs",
-    "lib/memorax-code-dsh-adapter/src/personal-context-worker.mjs",
-    "lib/memorax-code-dsh-adapter/src/personal-context.mjs",
-    "lib/memorax-code-dsh-adapter/src/plugin.mjs",
-    "lib/memorax-code-dsh-adapter/src/profile-lifecycle.mjs",
-    "lib/memorax-code-dsh-adapter/src/protocol.mjs",
-    "lib/memorax-code-dsh-adapter/src/runtime-state.mjs",
-    "lib/memorax-code-dsh-adapter/hooks/repo-memory-job.mjs",
-    "lib/memorax-code-dsh-adapter/skills/memorax-code/SKILL.md",
-    "lib/memorax-code-dsh-adapter/skills/memorax-code/scripts/repo-memory.mjs",
-    "lib/memorax-code-dsh-adapter/skills/memorax-code/scripts/user-profile-memory.mjs",
-    "lib/memorax-code-opencode-adapter/src/plugin.mjs",
-    "lib/memorax-code-opencode-adapter/src/plugin-install.mjs",
-    "lib/memorax-code-opencode-adapter/src/cli.mjs",
-    "lib/memorax-code-opencode-adapter/src/repo-memory-server-runner.mjs",
-    "lib/memorax-code-opencode-adapter/hooks/repo-memory-job.mjs",
-    "lib/memorax-code-opencode-adapter/skills/memorax-code/SKILL.md",
-    "lib/memorax-code-opencode-adapter/skills/memorax-code/scripts/repo-memory.mjs",
-    "lib/memorax-code-opencode-adapter/skills/memorax-code/scripts/user-profile-memory.mjs",
-    "lib/memorax-code-codebuddy-adapter/package.json",
-    "lib/memorax-code-codebuddy-adapter/.codebuddy-plugin/plugin.json",
-    "lib/memorax-code-codebuddy-adapter/hooks/hooks.json",
-    "lib/memorax-code-codebuddy-adapter/hooks/pending-state.mjs",
-    "lib/memorax-code-codebuddy-adapter/hooks/runtime-hook.mjs",
-    "lib/memorax-code-codebuddy-adapter/hooks/common-runtime.mjs",
-    "lib/memorax-code-codebuddy-adapter/hooks/repo-memory-job.mjs",
-    "lib/memorax-code-codebuddy-adapter/skills/memorax-code/SKILL.md",
-    "lib/memorax-code-codebuddy-adapter/skills/memorax-code/scripts/repo-memory.mjs",
-    "lib/memorax-code-codebuddy-adapter/skills/memorax-code/scripts/user-profile-memory.mjs",
-    "lib/memorax-code-codebuddy-adapter/skills/memorax-code/references/memorax-search.md",
-    "lib/memorax-code-codebuddy-adapter/skills/memorax-code/references/memorax-add.md",
-    "lib/memorax-code-codebuddy-adapter/src/config.mjs",
-    "lib/memorax-code-codebuddy-adapter/src/hook-manifest.mjs",
-    "lib/memorax-code-codebuddy-adapter/src/runtime-observation.mjs",
-    "lib/memorax-code-codebuddy-adapter/src/cli.mjs",
-    "lib/memorax-code-trae-adapter/package.json",
-    "lib/memorax-code-trae-adapter/hooks/runtime-hook.mjs",
-    "lib/memorax-code-trae-adapter/skills/memorax-code/SKILL.md",
-    "lib/memorax-code-trae-adapter/skills/memorax-code/scripts/repo-memory.mjs",
-    "lib/memorax-code-trae-adapter/skills/memorax-code/scripts/user-profile-memory.mjs",
-    "lib/memorax-code-trae-adapter/src/adapter-paths.mjs",
-    "lib/memorax-code-trae-adapter/src/cli.mjs",
-    "lib/memorax-code-trae-adapter/src/config.mjs",
-    "lib/memorax-code-trae-adapter/src/runtime-observation.mjs",
-    "lib/memorax-code-backend/dist/service-entrypoint.js",
-    "lib/memorax-code-backend/dist/memorax-cli.js",
-    "lib/memorax-code-backend/dist/repo-memory.js",
-    "lib/memorax-code-backend/dist/user-profile.js",
-    "lib/memorax-code-backend/dist/repo-memory/cli.js",
-    "lib/memorax-code-backend/dist/personal-memory/cli.js",
-    "lib/memorax-code-backend/dist/jsonl-append.js",
-]:
-    assert (package_root / relative).exists(), relative
 manifest = json.loads((package_root / "lib" / "memorax-code-codex-adapter" / ".codex-plugin" / "plugin.json").read_text())
 codebuddy_manifest = json.loads((package_root / "lib" / "memorax-code-codebuddy-adapter" / ".codebuddy-plugin" / "plugin.json").read_text())
 assert codebuddy_manifest["skills"] == ["./skills/memorax-code"]
@@ -427,137 +288,7 @@ actual = sorted(
 assert actual == expected, actual
 PY_INSTALLED_DOCS
 
-for relative in \
-  bin/memorax-code-npm-preinstall.mjs \
-  bin/memorax-code-plugin-postinstall.mjs \
-  bin/memorax-code-setup.mjs \
-  lib/client-hook-runtime.mjs \
-  lib/automatic-update.mjs \
-  lib/dsh-plugin-install.mjs \
-  lib/resolve-claude-command.mjs \
-  lib/resolve-codex-command.mjs \
-  lib/resolve-codebuddy-command.mjs \
-  lib/vscode-extension-command.mjs \
-  lib/npm-invocation.mjs \
-  lib/package-transition.mjs \
-  lib/setup-memory-preferences.mjs \
-  lib/setup-reconcile.mjs \
-  lib/trial-setup.mjs \
-  lib/windows-cli-invocation.mjs \
-  lib/windows-user-path.mjs \
-  lib/memorax-code-adapter-common/src/backend-command.mjs \
-  lib/memorax-code-adapter-common/src/backend-connection.mjs \
-  lib/memorax-code-adapter-common/src/config-utils.mjs \
-  lib/memorax-code-adapter-common/src/hooks/client-hook-launcher.mjs \
-  lib/memorax-code-adapter-common/src/clients/codex-plugin-artifact.mjs \
-  lib/memorax-code-adapter-common/src/hooks/hook-runtime-generation.mjs \
-  lib/memorax-code-adapter-common/src/hooks/memory-skill-reminder-policy.mjs \
-  lib/memorax-code-adapter-common/src/memorax-defaults.mjs \
-  lib/memorax-code-adapter-common/src/runtime-record.mjs \
-  lib/memorax-code-adapter-common/src/setup-completion.mjs \
-  lib/memorax-code-adapter-common/src/automatic-update-state.mjs \
-  lib/memorax-code-adapter-common/src/hooks/ensure-backend-runner.mjs \
-  lib/memorax-code-adapter-common/src/clients/claude-command.mjs \
-  lib/memorax-code-adapter-common/src/clients/codex-command.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-memory-auto-build.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-context.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-marker.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-procedure-memory-context.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-supervisor.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-memory-job-worker.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-memory-update-policy-evaluator.mjs \
-  lib/memorax-code-adapter-common/src/repo-memory/repo-memory-update-policy.mjs \
-  lib/memorax-code-adapter-common/src/windows-cli-invocation.mjs \
-  lib/memorax-code-backend/dist/clients/codex/plugin-hooks.js \
-  lib/memorax-code-backend/dist/codex-adapter-lifecycle.js \
-  lib/memorax-code-backend/dist/windows-cli-invocation.js \
-  lib/memorax-code-backend/dist/repo-memory.js \
-  lib/memorax-code-backend/dist/user-profile.js \
-  lib/memorax-code-backend/dist/repo-memory/cli.js \
-  lib/memorax-code-backend/dist/personal-memory/cli.js \
-  lib/memorax-code-backend/dist/memory/service.js \
-  lib/memorax-code-codex-adapter/hooks/runtime-hook.mjs \
-  lib/memorax-code-codex-adapter/hooks/runtime-shell.json \
-  lib/memorax-code-codex-adapter/runtime-hooks/memory-writeback.mjs \
-  lib/memorax-code-codex-adapter/skills/memorax-code/scripts/repo-memory.mjs \
-  lib/memorax-code-codex-adapter/skills/memorax-code/scripts/user-profile-memory.mjs \
-  lib/memorax-code-claude-adapter/hooks/runtime-hook.mjs \
-  lib/memorax-code-claude-adapter/hooks/runtime-shell.json \
-  lib/memorax-code-claude-adapter/hooks/repo-memory-job.mjs \
-  lib/memorax-code-claude-adapter/runtime-hooks/memory-turn.mjs \
-  lib/memorax-code-claude-adapter/skills/memorax-code/scripts/repo-memory.mjs \
-  lib/memorax-code-claude-adapter/skills/memorax-code/scripts/user-profile-memory.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/runtime-hook.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/runtime-shell.json \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/hooks/repo-memory-job.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/runtime-hooks/memory-turn.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-command.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/backend-connection.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/runtime-record.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/setup-completion.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/automatic-update-state.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/hooks/ensure-backend-runner.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/hooks/memory-skill-reminder-policy.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/repo-memory/repo-memory-auto-build.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/repo-memory/repo-procedure-memory-context.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/repo-memory/repo-user-profile-context.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/skills/memorax-code/SKILL.md \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/skills/memorax-code/scripts/repo-memory.mjs \
-  lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/skills/memorax-code/scripts/user-profile-memory.mjs \
-  lib/memorax-code-dsh-adapter/package.json \
-  lib/memorax-code-dsh-adapter/cordis.patch.yml \
-  lib/memorax-code-dsh-adapter/src/index.mjs \
-  lib/memorax-code-dsh-adapter/src/backend-client.mjs \
-  lib/memorax-code-dsh-adapter/src/dsh-message.mjs \
-  lib/memorax-code-dsh-adapter/src/dsh-version.mjs \
-  lib/memorax-code-dsh-adapter/src/http-client.mjs \
-  lib/memorax-code-dsh-adapter/src/personal-context-worker.mjs \
-  lib/memorax-code-dsh-adapter/src/personal-context.mjs \
-  lib/memorax-code-dsh-adapter/src/plugin.mjs \
-  lib/memorax-code-dsh-adapter/src/profile-lifecycle.mjs \
-  lib/memorax-code-dsh-adapter/src/protocol.mjs \
-  lib/memorax-code-dsh-adapter/src/runtime-state.mjs \
-  lib/memorax-code-dsh-adapter/hooks/repo-memory-job.mjs \
-  lib/memorax-code-dsh-adapter/skills/memorax-code/SKILL.md \
-  lib/memorax-code-dsh-adapter/skills/memorax-code/scripts/repo-memory.mjs \
-  lib/memorax-code-dsh-adapter/skills/memorax-code/scripts/user-profile-memory.mjs \
-  lib/memorax-code-opencode-adapter/src/plugin.mjs \
-  lib/memorax-code-opencode-adapter/src/plugin-install.mjs \
-  lib/memorax-code-opencode-adapter/src/cli.mjs \
-  lib/memorax-code-opencode-adapter/src/repo-memory-server-runner.mjs \
-  lib/memorax-code-opencode-adapter/hooks/repo-memory-job.mjs \
-  lib/memorax-code-opencode-adapter/skills/memorax-code/SKILL.md \
-  lib/memorax-code-opencode-adapter/skills/memorax-code/scripts/repo-memory.mjs \
-  lib/memorax-code-opencode-adapter/skills/memorax-code/scripts/user-profile-memory.mjs \
-  lib/memorax-code-codebuddy-adapter/package.json \
-  lib/memorax-code-codebuddy-adapter/.codebuddy-plugin/plugin.json \
-  lib/memorax-code-codebuddy-adapter/hooks/hooks.json \
-  lib/memorax-code-codebuddy-adapter/hooks/pending-state.mjs \
-  lib/memorax-code-codebuddy-adapter/hooks/runtime-hook.mjs \
-  lib/memorax-code-codebuddy-adapter/hooks/common-runtime.mjs \
-  lib/memorax-code-codebuddy-adapter/hooks/repo-memory-job.mjs \
-  lib/memorax-code-codebuddy-adapter/skills/memorax-code/SKILL.md \
-  lib/memorax-code-codebuddy-adapter/skills/memorax-code/scripts/repo-memory.mjs \
-  lib/memorax-code-codebuddy-adapter/skills/memorax-code/scripts/user-profile-memory.mjs \
-  lib/memorax-code-codebuddy-adapter/skills/memorax-code/references/memorax-search.md \
-  lib/memorax-code-codebuddy-adapter/skills/memorax-code/references/memorax-add.md \
-  lib/memorax-code-codebuddy-adapter/src/config.mjs \
-  lib/memorax-code-codebuddy-adapter/src/hook-manifest.mjs \
-  lib/memorax-code-codebuddy-adapter/src/runtime-observation.mjs \
-  lib/memorax-code-codebuddy-adapter/src/cli.mjs \
-  lib/memorax-code-trae-adapter/package.json \
-  lib/memorax-code-trae-adapter/hooks/runtime-hook.mjs \
-  lib/memorax-code-trae-adapter/skills/memorax-code/SKILL.md \
-  lib/memorax-code-trae-adapter/skills/memorax-code/scripts/repo-memory.mjs \
-  lib/memorax-code-trae-adapter/skills/memorax-code/scripts/user-profile-memory.mjs \
-  lib/memorax-code-trae-adapter/src/adapter-paths.mjs \
-  lib/memorax-code-trae-adapter/src/cli.mjs \
-  lib/memorax-code-trae-adapter/src/config.mjs \
-  lib/memorax-code-trae-adapter/src/runtime-observation.mjs
-do
-  test -f "$package_install_root/$relative"
-done
+check_required_files "$package_install_root"
 
 node --input-type=module -e '
   const lifecycle = await import(new URL("./lib/dsh-plugin-install.mjs", `file://${process.argv[1]}/`).href);
@@ -782,6 +513,15 @@ node -e '
 "$prefix/bin/memorax-code-claude" --help >/dev/null
 "$prefix/bin/memorax-code-opencode" --help >/dev/null
 
+# Simulate only the native CLI; the installed package still drives lifecycle and artifact checks.
+claude_cli_fixture="$(node --input-type=module - "$home_dir/claude-cli-fixture" <<'JS_CLAUDE_FIXTURE'
+import { prepareClaudePluginCli } from "./packages/ts/memorax-code-backend/test/lifecycle/support/backend-service-fixtures.mjs";
+console.log(JSON.stringify(await prepareClaudePluginCli(process.argv[2])));
+JS_CLAUDE_FIXTURE
+)"
+export MEMORAX_CODE_CLAUDE_COMMAND="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).claudeCommand)' "$claude_cli_fixture")"
+export FAKE_CLAUDE_PLUGIN_CALLS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).callsPath)' "$claude_cli_fixture")"
+
 claude_home="$home_dir/.claude-memorax-code-package-check"
 claude_memorax_code_home="$home_dir/.memorax-code-claude-package-check"
 claude_port="$(python3 - <<'PY_FREE_PORT'
@@ -867,6 +607,7 @@ PY_CLAUDE
 
 CLAUDE_CONFIG_DIR="$claude_home" MEMORAX_CODE_BACKEND_PORT="$claude_port" "$prefix/bin/memorax-code" stop --home "$claude_memorax_code_home" --port "$claude_port" --clients claude --json >/dev/null
 claude_smoke_started=0
+unset MEMORAX_CODE_CLAUDE_COMMAND FAKE_CLAUDE_PLUGIN_CALLS
 
 codex_home="$home_dir/.codex-memorax-code-package-check"
 CODEX_HOME="$codex_home" "$prefix/bin/memorax-code" codex-plugin install --json > "$home_dir/codex-plugin-install.json"

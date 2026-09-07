@@ -317,6 +317,23 @@ test("repo-memory-updater detects only local commits after the stored memory bas
     assert.equal(report.actions.length > 0, true);
     assert.match(report.actions.join("\n"), /resources\/commits\.md/);
     assert.doesNotMatch(report.actions.join("\n"), /full rebuild/i);
+
+    // The profile remains authoritative when the resource snapshot is older.
+    writeProfile(memory, latestSha);
+    for (const path of ["PROFILE.md", "resources/commits.md", "resources/prs.md", "resources/issues.md"]) {
+      const file = join(memory, path);
+      writeFileSync(file, readFileSync(file, "utf8").replaceAll("\n", "\r\n"));
+    }
+    const crlfResult = spawnSync(process.execPath, [repoMemoryScript, "detect-updates", "--repo-path", repo, "--pretty"], {
+      cwd: packageRoot,
+      encoding: "utf8",
+    });
+    assert.equal(crlfResult.status, 0, crlfResult.stderr || crlfResult.stdout);
+    const crlfReport = JSON.parse(crlfResult.stdout);
+    assert.equal(crlfReport.baseline.local_commit_sha, latestSha);
+    assert.deepEqual(crlfReport.deltas.local_commits, []);
+    assert.deepEqual(crlfReport.deltas.pull_requests, report.deltas.pull_requests);
+    assert.deepEqual(crlfReport.deltas.issues, report.deltas.issues);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

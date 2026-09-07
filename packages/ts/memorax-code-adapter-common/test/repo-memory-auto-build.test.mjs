@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { test } from "node:test";
 import { scheduleMissingRepoMemoryBuild } from "../src/repo-memory/repo-memory-auto-build.mjs";
 
@@ -10,6 +10,8 @@ test("Repo Memory auto-build schedules maintain only when PROFILE.md is missing"
   const repo = join(root, "repo");
   const pluginRoot = join(root, "plugin");
   const logPath = join(root, "job.json");
+  const memoraxCodeHome = join(root, "memorax-code");
+  const env = { ...process.env, MEMORAX_CODE_HOME: relative(process.cwd(), memoraxCodeHome) };
   try {
     await Promise.all([
       mkdir(repo, { recursive: true }),
@@ -17,16 +19,18 @@ test("Repo Memory auto-build schedules maintain only when PROFILE.md is missing"
     ]);
     await writeFile(join(pluginRoot, "hooks", "repo-memory-job.mjs"), [
       'import { writeFileSync } from "node:fs";',
-      `writeFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }));`,
+      `writeFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), home: process.env.MEMORAX_CODE_HOME }));`,
       "",
     ].join("\n"));
 
-    assert.equal(scheduleMissingRepoMemoryBuild(repo, { pluginRoot }), true);
+    assert.equal(scheduleMissingRepoMemoryBuild(repo, { pluginRoot, env }), true);
     const invocation = JSON.parse(await waitForFile(logPath));
     assert.deepEqual(invocation, {
       args: ["maintain", "--repo", repo],
       cwd: await realpath(repo),
+      home: memoraxCodeHome,
     });
+    assert.equal(env.MEMORAX_CODE_HOME, relative(process.cwd(), memoraxCodeHome));
 
     await mkdir(join(repo, ".repo_memory"), { recursive: true });
     await writeFile(join(repo, ".repo_memory", "PROFILE.md"), "# Repo Memory\n");

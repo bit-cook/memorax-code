@@ -294,6 +294,7 @@ async function executeMemoraxCodeStart(
     dshLifecycle,
     lifecycleBackendContext,
     quiescedDsh,
+    clients,
   );
   // A failed Backend ownership check must leave the active client generation
   // and its conservative cleanup marker untouched.
@@ -582,8 +583,8 @@ async function executeMemoraxCodeStop(
     };
   }
   // A true partial stop keeps the shared Backend for remaining clients. DSH
-  // publishes its inert sentinel first; every other adapter is disabled only
-  // after an accepted Backend shutdown.
+  // publishes its inert sentinel first; when shutdown is required, leave the
+  // other adapters unchanged until it is accepted.
   const stoppedBackend = needsBackendStop
     ? await stopBackendService(serviceOptions)
     : undefined;
@@ -1022,11 +1023,38 @@ async function recoverStartPreparationFailure(
   dshLifecycle: DshAdapterLifecycleParticipant | undefined,
   context: Readonly<{ argv: string[]; serviceOptions: BackendServiceOptions; backendUrl: string }>,
   quiescedDsh: AdapterReport | undefined,
+  requestedClients: ManagedClients,
 ): Promise<{
   backend: Awaited<ReturnType<typeof startBackendService>>;
   dshAdapter?: AdapterReport;
 }> {
   const backend = await recoverBackendAfterStartPreparationFailure(serviceOptions, reason);
+  if (backend.ok && quiescedDsh?.previouslyEnabled === true) {
+    // Recovery can re-enable a deselected DSH after the marker was replaced.
+    // Retain it and newly prepared clients in cleanup scope before activation.
+    try {
+      const memoraxCodeHome = memoraxCodeHomeForService(serviceOptions);
+      const activeClients = readActiveManagedClients(memoraxCodeHome);
+      if (!activeClients?.dsh) {
+        writeActiveManagedClients(memoraxCodeHome, {
+          ...(activeClients ?? requestedClients),
+          dsh: true,
+        });
+      }
+    } catch (error) {
+      return {
+        backend,
+        dshAdapter: {
+          ok: false,
+          action: "dsh-plugin-activate",
+          integration: "plugin",
+          runtime: "dsh",
+          reason: "dsh_recovery_cleanup_scope_failed",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
   const dshAdapter = backend.ok
     ? await restorePreviouslyEnabledDsh(dshLifecycle, context, quiescedDsh)
     : undefined;

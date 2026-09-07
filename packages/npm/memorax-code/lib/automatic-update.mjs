@@ -132,6 +132,8 @@ export async function runAutomaticUpdateCore(options) {
       updated = true;
     }
 
+    // An interrupted update can leave current package files with client setup
+    // still completed by an older version.
     if (updated || completedByVersion !== effectiveVersion) {
       let reconciled = false;
       try {

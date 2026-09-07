@@ -121,6 +121,7 @@ function filesUnder(root: string, extension: string): string[] {
 }
 
 function parseFrontmatter(text: string): Record<string, unknown> {
+  text = text.replaceAll("\r\n", "\n");
   if (!text.startsWith("---\n")) return {};
   const end = text.indexOf("\n---", 4);
   if (end < 0) return {};
@@ -147,6 +148,7 @@ function parseFrontmatter(text: string): Record<string, unknown> {
 }
 
 function bodyAfterFrontmatter(text: string): string {
+  text = text.replaceAll("\r\n", "\n");
   if (!text.startsWith("---\n")) return text;
   const end = text.indexOf("\n---", 4);
   if (end < 0) return text;

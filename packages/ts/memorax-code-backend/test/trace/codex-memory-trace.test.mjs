@@ -488,7 +488,7 @@ test("trace store writes one max_file_bytes warning across concurrent writers an
   }
 });
 
-test("current turn bridge respects enabled and stale contracts", async () => {
+test("current turn bridge remains available with tracing disabled and respects stale contracts", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-current-turn-"));
   try {
     const context = traceContextFromHookBody({
@@ -496,23 +496,20 @@ test("current turn bridge respects enabled and stale contracts", async () => {
       turn_id: "turn-current",
     }, "2026-07-09T00:00:00.000Z");
 
-    assert.deepEqual(await writeCurrentCodexTurn(context, {
-      memoraxCodeHome: root,
-      config: {
-        enabled: false,
-        captureContent: true,
-        retentionDays: 7,
-        maxEventChars: 20_000,
-        maxFileBytes: 52_428_800,
-      },
-    }), { written: false, reason: "disabled" });
-
-    await assert.rejects(readFile(tracePaths(root).currentTurnPath, "utf8"));
+    await writeFile(join(root, "config.toml"), "[trace.codex]\nenabled = false\n", "utf8");
 
     assert.deepEqual(await writeCurrentCodexTurn(context, {
       memoraxCodeHome: root,
       now: () => new Date("2026-07-09T00:00:00.000Z"),
     }), { written: true });
+    assert.deepEqual(await recordCodexTraceEvent({
+      memoraxCodeHome: root,
+      traceContext: context,
+      type: "turn_start",
+      request: { prompt: "disabled trace must not persist this content" },
+    }), { written: false, reason: "disabled" });
+    await assert.rejects(stat(tracePaths(root).eventsJsonl(context.sessionId)), { code: "ENOENT" });
+    await assert.rejects(stat(tracePaths(root).traceJson(context.sessionId)), { code: "ENOENT" });
 
     const fresh = await readCurrentCodexTurn({
       memoraxCodeHome: root,
@@ -576,6 +573,8 @@ test("current turn bridge reads session-scoped turns before global current turn"
       memoraxCodeHome: root,
       now: () => new Date("2026-07-09T00:01:00.000Z"),
     });
+
+    await writeFile(join(root, "config.toml"), "[trace.codex]\nenabled = false\n", "utf8");
 
     const sessionA = await readCurrentCodexTurn({
       memoraxCodeHome: root,
@@ -642,6 +641,7 @@ test("current turn bridge preserves recent context after closing rollout reconci
       now: () => new Date("2026-07-09T00:01:00.000Z"),
     })).ok, true);
 
+    await writeFile(join(root, "config.toml"), "[trace.codex]\nenabled = false\n", "utf8");
     assert.deepEqual(await markCurrentCodexTurnOutcome(context, "completed", {
       memoraxCodeHome: root,
     }), { updated: true });
@@ -682,6 +682,7 @@ test("Backend startup prunes expired client-qualified trace sessions", async () 
   try {
     await writeFile(join(root, "config.toml"), [
       "[trace.codex]",
+      "enabled = false",
       "retention_days = 1",
       "",
       "[trace.claude]",
@@ -706,12 +707,14 @@ test("Backend startup prunes expired client-qualified trace sessions", async () 
       freshDshDir,
     ]) {
       await mkdir(directory, { recursive: true });
-      await writeFile(join(directory, "events.jsonl"), "{}\n", "utf8");
+      const filename = directory === oldCodexDir || directory === freshCodexDir ? ".current-turn.json" : "events.jsonl";
+      await writeFile(join(directory, filename), "{}\n", "utf8");
     }
     const oldTime = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     for (const directory of [oldCodexDir, oldClaudeDir, oldDshDir]) {
       await utimes(directory, oldTime, oldTime);
-      await utimes(join(directory, "events.jsonl"), oldTime, oldTime);
+      const filename = directory === oldCodexDir ? ".current-turn.json" : "events.jsonl";
+      await utimes(join(directory, filename), oldTime, oldTime);
     }
 
     server = createBackendServer(createBackendState("127.0.0.1", {
@@ -733,7 +736,7 @@ test("Backend startup prunes expired client-qualified trace sessions", async () 
   }
 });
 
-test("retention keeps sessions with fresh trace files even when directory mtime is old", async () => {
+test("retention keeps fresh trace or current-turn files even when directory mtime is old", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-trace-retention-active-"));
   try {
     await writeFile(join(root, "config.toml"), [
@@ -753,28 +756,37 @@ test("retention keeps sessions with fresh trace files even when directory mtime 
     await writeFile(join(sessionDir, "events.jsonl"), "{}\n", "utf8");
     const oldTime = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     await utimes(sessionDir, oldTime, oldTime);
+    const currentPaths = ["active-current", "expired-current"].map((sessionId) => tracePaths(root).sessionDir(sessionId));
+    for (const directory of currentPaths) {
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, ".current-turn.json"), "{}\n", "utf8");
+      await utimes(directory, oldTime, oldTime);
+    }
+    await utimes(join(currentPaths[1], ".current-turn.json"), oldTime, oldTime);
 
     await pruneExpiredCodexTraceSessions({ memoraxCodeHome: root });
 
     await stat(sessionDir);
+    await stat(currentPaths[0]);
+    await assert.rejects(stat(currentPaths[1]), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("append path honors cross-process retention debounce marker", async () => {
+test("event and current-turn writes honor cross-process retention debounce markers", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-trace-retention-debounce-"));
   const now = new Date("2026-07-09T00:00:00.000Z");
   const oldTime = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
   try {
-    for (const hasMarker of [true, false]) {
-      const home = join(root, hasMarker ? "fresh-marker" : "no-marker");
+    for (const [hasMarker, enabled] of [[true, true], [false, true], [true, false], [false, false]]) {
+      const home = join(root, `${enabled ? "events" : "current"}-${hasMarker ? "fresh-marker" : "no-marker"}`);
       const paths = tracePaths(home);
       const oldDir = paths.sessionDir("old-session");
-      const oldEvents = paths.eventsJsonl("old-session");
+      const oldState = enabled ? paths.eventsJsonl("old-session") : paths.sessionCurrentTurnPath("old-session");
       await mkdir(oldDir, { recursive: true });
-      await writeFile(oldEvents, "{}\n", "utf8");
-      await utimes(oldEvents, oldTime, oldTime);
+      await writeFile(oldState, "{}\n", "utf8");
+      await utimes(oldState, oldTime, oldTime);
       await utimes(oldDir, oldTime, oldTime);
       if (hasMarker) {
         const markerPath = join(paths.root, ".retention-cleanup.json");
@@ -782,27 +794,35 @@ test("append path honors cross-process retention debounce marker", async () => {
         await utimes(markerPath, now, now);
       }
 
-      const result = await recordCodexTraceEvent({
+      const options = {
         memoraxCodeHome: home,
         config: {
-          enabled: true,
+          enabled,
           captureContent: true,
           retentionDays: 1,
           maxEventChars: 20_000,
           maxFileBytes: 52_428_800,
         },
-        traceContext: traceContextFromHookBody({ session_id: "new-session" }),
+        now: () => now,
+      };
+      const context = traceContextFromHookBody({ session_id: "new-session", turn_id: "new-turn" });
+      const result = enabled ? await recordCodexTraceEvent({
+        ...options,
+        traceContext: context,
         type: "memory_retrieve",
         source: "automatic_retrieval",
         operation: "retrieve",
         ok: true,
         request: { query: "do not scan every CLI append" },
-        now: () => now,
-      });
+      }) : await writeCurrentCodexTurn(context, options);
 
-      assert.deepEqual(result, { written: true, path: paths.eventsJsonl("new-session") });
+      assert.deepEqual(result, enabled ? { written: true, path: paths.eventsJsonl("new-session") } : { written: true });
+      if (!enabled) {
+        await assert.rejects(stat(paths.eventsJsonl("new-session")), { code: "ENOENT" });
+        await assert.rejects(stat(paths.traceJson("new-session")), { code: "ENOENT" });
+      }
       if (hasMarker) {
-        assert.equal(await readFile(oldEvents, "utf8"), "{}\n");
+        assert.equal(await readFile(oldState, "utf8"), "{}\n");
       } else {
         await assert.rejects(stat(oldDir), { code: "ENOENT" });
       }

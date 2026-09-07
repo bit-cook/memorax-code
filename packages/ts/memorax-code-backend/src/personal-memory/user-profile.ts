@@ -76,6 +76,12 @@ function normalizeKey(value: string): string {
   }).join("");
 }
 
+function normalizeScopeKey(value: string): string {
+  const key = normalizeKey(value);
+  // The Markdown writer represents empty applicability and exceptions as "-".
+  return key === "-" ? "" : key;
+}
+
 function resolveRepo(path: string): string {
   const start = resolve(path);
   if (!existsSync(start)) throw new Error(`Repository path does not exist: ${start}`);
@@ -289,6 +295,10 @@ function makeId(entries: Preference[], type: PreferenceType, description: string
 }
 
 export function executeUserProfile(args: UserProfileCommand): Record<string, unknown> {
+  if ((args.command === "add" || args.command === "update") && !normalizeField(args.description)) {
+    // Reject before creating storage; readers cannot accept an empty active entry.
+    throw new Error("Preference description must not be empty");
+  }
   const repo = resolveRepo(args.repo);
   const path = preferencesPath(repo);
   if (args.command === "list") {
@@ -312,10 +322,13 @@ export function executeUserProfile(args: UserProfileCommand): Record<string, unk
     const timestamp = new Date().toISOString();
     if (args.command === "add") {
       const description = normalizeField(args.description);
-      const requested = normalizeKey(description);
-      const duplicate = entries.find((entry) => requested && normalizeKey([
-        entry.description, entry.applies_when, entry.do_not_apply_when,
-      ].join(" ")).includes(requested));
+      const descriptionKey = normalizeKey(description);
+      const scopeKey = normalizeScopeKey(args.appliesWhen);
+      const exceptionKey = normalizeScopeKey(args.doNotApplyWhen);
+      // Only exact content and scope are duplicates; semantic merging belongs to the Skill.
+      const duplicate = entries.find((entry) => normalizeKey(entry.description) === descriptionKey
+        && normalizeScopeKey(entry.applies_when) === scopeKey
+        && normalizeScopeKey(entry.do_not_apply_when) === exceptionKey);
       if (duplicate) return result("duplicate", duplicate.id, entries.length);
       const entry: Preference = {
         id: makeId(entries, args.type, description, timestamp), type: args.type,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -22,6 +23,7 @@ test("release version check detects drift and write aligns only declared targets
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, "utf8");
     }
+    const dryRunEntries = process.platform === "win32" ? [] : await prepareDryRunEntries(root);
 
     const checked = await syncReleaseVersion({ root });
     assert.equal(checked.ok, false);
@@ -33,6 +35,12 @@ test("release version check detects drift and write aligns only declared targets
         `${JSON.stringify(document, null, 2)}\n`,
         `${file}: check must leave the original bytes unchanged`,
       );
+    }
+    for (const run of dryRunEntries) {
+      const result = run();
+      assert.notEqual(result.status, 0, result.stderr);
+      assert.match(result.stderr, /expected 1\.2\.3/);
+      assert.doesNotMatch(result.stderr, /fixture build reached/);
     }
 
     const written = await syncReleaseVersion({ root, write: true });
@@ -52,10 +60,36 @@ test("release version check detects drift and write aligns only declared targets
     const rechecked = await syncReleaseVersion({ root });
     assert.equal(rechecked.ok, true);
     assert.equal(rechecked.mismatches.length, 0);
+    for (const run of dryRunEntries) {
+      const result = run();
+      assert.match(result.stderr, /fixture build reached/);
+      assert.equal((result.stdout.match(/release version 1\.2\.3: all targets match/g) ?? []).length, 1);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+async function prepareDryRunEntries(root) {
+  await mkdir(join(root, "scripts"));
+  await mkdir(join(root, "bin"));
+  for (const path of ["Makefile", "scripts/npm-publish-dry-run.sh", "scripts/sync-release-version.mjs"]) {
+    await copyFile(new URL(`../../../../${path}`, import.meta.url), join(root, path));
+  }
+  await symlink(process.execPath, join(root, "bin", "node"));
+  // Stop at the first build operation so this fixture cannot install or publish.
+  await writeFile(join(root, "scripts", "build-npm-packages.sh"),
+    "#!/usr/bin/env bash\necho 'fixture build reached' >&2\nexit 73\n", { mode: 0o755 });
+  return [
+    ["bash", ["scripts/npm-publish-dry-run.sh"]],
+    ["make", ["npm-publish-dry-run"]],
+  ].map(([command, args]) => () => spawnSync(command, args, {
+    cwd: root,
+    env: { PATH: `${join(root, "bin")}:/usr/bin:/bin`, HOME: root },
+    encoding: "utf8",
+    timeout: 5000,
+  }));
+}
 
 function addFixtureField(files, target, value) {
   const document = files.get(target.file) ?? { fixtureMarker: "preserved" };

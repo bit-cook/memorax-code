@@ -176,7 +176,9 @@ export async function runNpmPostinstallPackageTransition(options = {}) {
       throw transitionError("PACKAGE_TRANSITION_NOT_RETIRED", "package transition is still retiring");
     }
     const ageMs = nowMs(options) - Date.parse(current.record.retiredAt);
-    if (ageMs < 0 || ageMs > PACKAGE_TRANSITION_FRESHNESS_MS) {
+    // Unattended restoration expires; explicit recovery renews the user's
+    // intent to start the installed package without rewriting the old record.
+    if (ageMs < 0 || (ageMs > PACKAGE_TRANSITION_FRESHNESS_MS && options.recover !== true)) {
       throw transitionError("PACKAGE_TRANSITION_STALE", "retired package transition is stale");
     }
 

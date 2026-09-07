@@ -27,6 +27,7 @@ function readPackageJson() {
 
 function printUpdateHelp() {
   console.log(`Usage: memorax-code update [--preview | --latest] [--force] [--home DIR] [--dry-run]
+       memorax-code update --recover [--home DIR]
 
 Update the globally installed MemoraX Code npm package.
 
@@ -36,6 +37,7 @@ Options:
   --force     Reinstall the selected channel with npm install --force
   --home DIR  Update the Backend managed under this MemoraX Code home
   --dry-run   Print the npm command without running it
+  --recover   Restore and verify the installed package after a failed transition
   -h, --help  Show this help message`);
 }
 
@@ -123,6 +125,7 @@ async function runAccountCommand(args) {
 
 async function runUpdateCommand(args) {
   let automatic = false;
+  let recover = false;
   let dryRun = false;
   let force = false;
   let requestedChannel;
@@ -132,6 +135,8 @@ async function runUpdateCommand(args) {
     const arg = args[index];
     if (arg === "--automatic") {
       automatic = true;
+    } else if (arg === "--recover") {
+      recover = true;
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--force") {
@@ -170,6 +175,14 @@ async function runUpdateCommand(args) {
     }
   }
 
+  if (recover) {
+    if (automatic || dryRun || force || requestedChannel) {
+      console.error("memorax-code update: --recover cannot be combined with automatic, channel, force, or dry-run options");
+      return 2;
+    }
+    return await runUpdateRecoveryCommand(requestedHome ?? requestedMemoraxCodeHome([]));
+  }
+
   const pkg = readPackageJson();
   if (automatic) {
     if (dryRun || force || requestedChannel) {
@@ -191,13 +204,15 @@ async function runUpdateCommand(args) {
     return 0;
   }
 
+  // npm lifecycle scripts change cwd; keep the caller's state root absolute.
+  const memoraxCodeHome = requestedHome ?? requestedMemoraxCodeHome([]);
   console.error(`memorax-code update: running ${["npm", ...npmArgs].join(" ")}`);
   let npmResult;
   try {
     npmResult = await runNpmCommand(npmArgs, {
       env: {
         ...process.env,
-        ...(requestedHome ? { MEMORAX_CODE_HOME: requestedHome } : {}),
+        MEMORAX_CODE_HOME: memoraxCodeHome,
       },
       stdio: "inherit",
     });
@@ -210,12 +225,36 @@ async function runUpdateCommand(args) {
   }
   if (npmResult.exitCode !== 0) return npmResult.exitCode;
 
-  const memoraxCodeHome = requestedHome ?? requestedMemoraxCodeHome([]);
   if (!setupCanPrompt()) {
     console.error("memorax-code update: package updated; run `memorax-code setup` from a terminal to reconcile clients and verify Hook changes");
     return 0;
   }
   return await runSetupCommand(["--home", memoraxCodeHome], { updateMode: true });
+}
+
+async function runUpdateRecoveryCommand(memoraxCodeHome) {
+  try {
+    // Resume restoration under the transition lock; another npm preinstall must
+    // still reject pending state because it may belong to an active installation.
+    const { runNpmPostinstallPackageTransition } = await import("../lib/package-transition.mjs");
+    const result = await runNpmPostinstallPackageTransition({
+      memoraxCodeHome,
+      memoraxCodeBin: join(packageRoot(), "bin", "memorax-code.mjs"),
+      recover: true,
+    });
+    if (result.disposition === "restored") {
+      console.error("memorax-code update: installed package restored and verified; run `memorax-code setup` with the same --home or MEMORAX_CODE_HOME to reconcile clients and verify Hook changes");
+    } else {
+      console.error("memorax-code update: no pending package transition to recover");
+    }
+    return 0;
+  } catch (error) {
+    for (const output of [error?.command?.stdout, error?.command?.stderr]) {
+      if (output?.trim()) console.error(output.trimEnd());
+    }
+    console.error(`memorax-code update: recovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
 }
 
 async function runAutomaticUpdateCommand({ pkg, memoraxCodeHome }) {

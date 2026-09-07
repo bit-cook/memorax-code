@@ -58,6 +58,8 @@ export function startBackendAutomaticUpdateScheduler(
   let closed = false;
   let childRunning = false;
   let timer: TimerHandle | undefined;
+  // The updater may restart the Backend before committing its next deadline;
+  // defer the first launch to avoid recursively dispatching another updater.
   let suppressImmediate = env.MEMORAX_CODE_AUTOMATIC_UPDATE_PROCESS === "1";
 
   const debug = (message: string): void => options.debug?.(message);
@@ -143,6 +145,8 @@ export function startBackendAutomaticUpdateScheduler(
   reconcile();
   return {
     close() {
+      // The detached updater may be replacing this Backend. Stop future
+      // dispatch without interrupting that package transition.
       if (closed) return;
       closed = true;
       if (timer !== undefined) clearTimer(timer);

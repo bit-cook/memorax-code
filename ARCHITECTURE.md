@@ -215,6 +215,12 @@ sequenceDiagram
     NPM->>Lifecycle: restore and verify managed runtime
     NPM->>Transition: consume only after successful status
   end
+  opt explicit recovery after failed restoration
+    User->>Setup: update --recover
+    Setup->>Transition: lock and validate retired record
+    Setup->>Lifecycle: restore and verify installed package
+    Setup->>Transition: consume only after successful status
+  end
 
   User->>Setup: interactive setup
   Setup->>Generation: stage immutable Hook runtime
@@ -257,6 +263,12 @@ succeeds. Retained DSH state also triggers retirement and restoration, even
 without a live Backend PID or when that state is disabled. Fresh or stopped
 installations without retained DSH state remain stopped. npm lifecycle never
 detects new clients, accepts credentials, or authorizes Hooks.
+
+Explicit `memorax-code update --recover` reuses package-transition restoration
+and its lock for the already installed package. The user's recovery request
+permits an expired retired record; unattended npm restoration retains its
+freshness limit. Both paths reject incomplete retirement, invalid records, and
+future timestamps, and consume state only after successful start and status.
 
 Public `memorax-code setup` owns disclosure, preferences, credential
 provisioning or entry, client discovery, initial Hook activation, and Backend
@@ -814,7 +826,8 @@ and
 | Automatic update cadence | Versioned private automatic-update record plus its bounded lock | Managed Backend timer state or client process lifetime |
 | Quota reminders | Versioned private local runtime record keyed by a one-way connection fingerprint for deduplication; normalized MemoraX balances for the quota amount; a ready secure trial record matching the active API key for optional anonymous Mark ID text | Account registration status, raw API keys, and in-memory reminder state are not quota-reminder authority |
 | MemoraX memory results and Add acceptance | Normalized response from `provider/memorax` | Observability and trace |
-| Persisted current-turn operational state and trace history | Client-qualified local trace records | Diagnostics; not native content or general Turn-identity authority |
+| Persisted current-turn operational state | Client-qualified current-turn records with Session and Turn checks | CLI workspace association and exact recovery; native content is independently validated |
+| Trace history | Client-qualified local trace events | Diagnostics; not native content or general Turn-identity authority |
 | Repo Memory bundle | Repository-local `.repo_memory` files authored through explicit Skill operations or supervised jobs | Backend readiness and client-injected guidance |
 
 #### Native writeback authority
@@ -891,6 +904,14 @@ These paths are not all mediated by `app/memory-observability`. Memory-service
 kernels receive Backend diagnostics through a port; CLI composition can use
 the Backend debug logger directly.
 
+Current-turn records share the trace Store and existing paths but serve an
+operational role. Their read, write, and outcome updates are independent of
+`trace.enabled`, so disabling event capture does not change CLI workspace scope
+or remove exact recovery context. They retain only identity, path, and lifecycle
+metadata; Session checks, freshness checks, and session retention still apply.
+The observability sink checks the effective trace configuration for each event
+rather than freezing the enabled clients at Backend startup.
+
 Raw native transcript files, transcript paths, and retained trace files stay
 local. Only normalized Search and Add requests cross the MemoraX
 provider boundary. An Add request may carry messages materialized from the
@@ -954,6 +975,11 @@ phases of the same build; packed-file and extracted-tarball checks run after
   to locate staged Backend and adapter entrypoints.
 - Artifact gates reject undeclared paths, unsafe symlinks, cache/build debris,
   and local-only data-boundary violations.
+- Build, extracted-tarball, and installed-package checks share the required
+  artifact contract in `scripts/npm-package-layout.mjs`: declared public
+  commands, plugin manifests, shared Skill launchers, and key process
+  entrypoints. Source mappings cover internal files; the publish allowlist
+  remains a separate restriction on permitted paths.
 - Run installed-package checks in the
   [isolated development environment](CONTRIBUTING.md#isolated-development-environment).
   Inherited client-home, alias, and command overrides must not select developer

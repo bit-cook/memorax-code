@@ -135,15 +135,30 @@ Replacing a running managed installation uses
 `$MEMORAX_CODE_HOME/runtime/install/package-transition.json`. If preinstall
 cannot retire the old Backend, installation stops before package replacement.
 If postinstall cannot start or verify the new Backend, the retired transition
-is retained for a bounded retry.
+is retained for recovery.
 
-Do not delete the record while the old Backend or another lifecycle command may
-still own state. After confirming process ownership, retry:
+After the original npm command has exited and the reported startup or status
+problem is corrected, resume restoration of the installed package:
 
 ```sh
-memorax-code stop --clients none
-npm install -g @memorax/memorax-code
+memorax-code update --recover
+memorax-code setup
 ```
+
+Pass the same `--home DIR` to both commands when using a custom state root.
+Recovery starts and verifies the installed Backend under the transition lock,
+then removes the record only after both operations succeed. It does not run
+npm or replace package files. The subsequent setup reconciles clients and
+verifies Hook changes. Repeating npm installation while a transition is pending
+can be rejected again, including when DSH state remains after a stop.
+
+Automatic postinstall recovery accepts a retired record for 15 minutes.
+Explicit `--recover` also accepts an older valid retired record, so time spent
+diagnosing the failure does not prevent recovery. A still-retiring, malformed,
+unsupported, or future-dated record is preserved and rejected. Inspect process
+ownership and the reported state before repairing such a record; an unsupported
+version requires a compatible MemoraX Code release. Do not delete a record while
+an installation or lifecycle command may still own it.
 
 Fresh and already-stopped installations without retained DSH state do not
 create a transition and remain stopped. Retained DSH state also triggers

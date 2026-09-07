@@ -214,6 +214,7 @@ MemoraX Code 会先比较含义：语义相同的请求不重复写入；长期�
 受支持客户端的本地 trace 默认开启。根据客户端能力，`MEMORAX_CODE_HOME` 下保留的 trace
 可能包含用户指令、Agent 回复、召回的 Memory、提醒文本和本地路径。可通过
 [本地 trace 配置](docs/configuration.md#local-traces)改为仅记录元数据，或关闭对应客户端的 trace。
+关闭 trace 后仍会保留必要的本地会话状态，以保证记忆操作使用正确的工作区范围。
 
 游客额度提醒可能显示完整的 Mark ID；请将包含该信息的提醒文本和本地 trace 视为敏感信息。
 
@@ -239,6 +240,8 @@ memorax-code update
 再按保留的客户端选择恢复。发布通道、自定义状态目录、客户端选择、Backend 恢复规则和关闭后台检查
 的方法见[更新配置](docs/configuration.md#setup-automatic-update-and-package-transition-state)。
 如果更新修改了运行中客户端已加载的集成资产，请重启或刷新客户端。
+如果包替换失败，请按[更新恢复步骤](docs/troubleshooting.md#npm-package-transition-fails)
+使用 `memorax-code update --recover`。
 
 ### Windows 升级提示
 

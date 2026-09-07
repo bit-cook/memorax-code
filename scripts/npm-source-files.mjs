@@ -38,6 +38,7 @@ export const npmMainSourceTrees = Object.freeze([
     source: "packages/ts/memorax-code-opencode-adapter/hooks",
     destination: "lib/memorax-code-opencode-adapter/hooks",
   },
+  // Materialize the canonical Skill for each client so npm artifacts never depend on source symlinks.
   {
     source: "packages/ts/memorax-code-codex-adapter/skills/memorax-code",
     destination: "lib/memorax-code-claude-adapter/skills/memorax-code",

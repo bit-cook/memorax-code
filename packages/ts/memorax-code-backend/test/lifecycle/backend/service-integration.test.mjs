@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,6 +89,38 @@ test("memorax-code lifecycle serializes concurrent starts without losing PID aut
     } finally {
       await rm(home, { recursive: true, force: true });
     }
+  }
+});
+
+test("lifecycle resolves relative homes before spawning the Backend", async (t) => {
+  const cliPath = fileURLToPath(new URL("../../../dist/memorax-code.js", import.meta.url));
+  for (const source of ["argument", "environment"]) {
+    await t.test(source, async () => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), "memorax-code-relative-home-")));
+      const home = join(root, "state");
+      const port = await freePort();
+      const options = {
+        cwd: root,
+        ...(source === "environment" ? { env: { MEMORAX_CODE_HOME: "./state" } } : {}),
+      };
+      const homeArgs = source === "argument" ? ["--home", "./state"] : [];
+      try {
+        const started = await runCli(cliPath, [
+          "start", "--json", "--clients", "none", "--port", String(port), ...homeArgs,
+        ], options);
+        assert.equal(started.code, 0, `${started.stdout}\n${started.stderr}`);
+        const status = await runBackendStatus(`http://127.0.0.1:${port}`);
+        assert.equal(status.ok, true);
+        assert.equal(status.state.sessionHome, home);
+        assert.equal(await pathExists(join(home, "config.toml")), true);
+      } finally {
+        const stopped = await runCli(cliPath, [
+          "stop", "--json", "--clients", "none", ...homeArgs,
+        ], options);
+        assert.equal(stopped.code, 0, `${stopped.stdout}\n${stopped.stderr}`);
+        await rm(root, { recursive: true, force: true });
+      }
+    });
   }
 });
 

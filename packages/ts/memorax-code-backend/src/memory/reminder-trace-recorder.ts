@@ -29,6 +29,7 @@ export function createMemoryReminderTraceRecorder(
 ): MemoryReminderTraceRecorder {
   return {
     async recordSkillReminder(body) {
+      // Success acknowledges a best-effort recording attempt, not delivery to the client.
       const parsed = parseSkillReminderCommand(body);
       if (!parsed.ok) {
         options.diagnosticLogger?.("memory_hook.skill_reminder_invalid", {

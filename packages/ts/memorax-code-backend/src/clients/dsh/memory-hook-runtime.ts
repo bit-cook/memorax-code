@@ -207,8 +207,7 @@ async function recordDshTurnEnd(
       native_outcome: details.nativeOutcome,
     },
   }), options.diagnosticLogger);
-  if (!recorded || (!recorded.written && recorded.reason !== "duplicate_event")) return;
-  if (details.turn && eventId) {
+  if (details.turn && eventId && recorded && (recorded.written || recorded.reason === "duplicate_event")) {
     await recordDshTraceBestEffort("dsh_memory.turn_materialized_event", recordTraceEvent({
       eventId: traceTurnEventId(traceContext, "turn_materialized"),
       memoraxCodeHome: options.memoraxCodeHome,
@@ -230,6 +229,7 @@ async function recordDshTurnEnd(
       },
     }), options.diagnosticLogger);
   }
+  // Closing operational state must not depend on retaining its trace event.
   await recordDshTraceBestEffort("dsh_memory.current_turn_close", markCurrentTraceTurnOutcome(
     traceContext,
     details.outcome,

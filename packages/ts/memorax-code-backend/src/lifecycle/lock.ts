@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { withJsonFileLockAsync } from "../../../memorax-code-adapter-common/src/config-utils.mjs";
 import type { BackendServiceOptions } from "./contracts.js";
 
@@ -19,7 +19,8 @@ export class BackendLifecycleLockError extends Error {
 }
 
 export function backendServiceHome(options: BackendServiceOptions = {}): string {
-  return options.home ?? process.env.MEMORAX_CODE_HOME ?? join(homedir(), ".memorax-code");
+  // The detached Backend changes cwd; resolve once in the caller's directory.
+  return resolve(options.home ?? process.env.MEMORAX_CODE_HOME ?? join(homedir(), ".memorax-code"));
 }
 
 export function backendLifecycleLockTarget(options: BackendServiceOptions = {}): string {

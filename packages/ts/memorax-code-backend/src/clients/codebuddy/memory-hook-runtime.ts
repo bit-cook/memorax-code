@@ -36,6 +36,7 @@ export function createCodeBuddyMemoryHookRuntime(options: Options = {}): CodeBud
     writebackSource: "codebuddy_hook_writeback",
     diagnosticPrefix: "codebuddy_memory_hook",
     traceFailureEvent: "codebuddy_trace.write_failed",
+    turnStartTraceSource: "codebuddy-hook",
     deduplicateRetrieval: false,
   }, options);
   const coordinator = memory.turnCoordinator;
@@ -264,7 +265,7 @@ async function recordCodeBuddyInterruptedTurnEnd(
   traceContext: TraceContext,
   turn: CodeBuddyInterruptedTurn,
 ): Promise<void> {
-  const recorded = await recordTraceBestEffort(
+  await recordTraceBestEffort(
     "codebuddy_memory_hook.interrupted_turn_end_event",
     recordCodeBuddyTraceEvent({
       eventId: traceTurnEventId(traceContext, "turn_end"),
@@ -283,7 +284,7 @@ async function recordCodeBuddyInterruptedTurnEnd(
     }),
     options.diagnosticLogger,
   );
-  if (!recorded || (!recorded.written && recorded.reason !== "duplicate_event")) return;
+  // Closing operational state must not depend on retaining its trace event.
   await recordTraceBestEffort(
     "codebuddy_memory_hook.interrupted_current_turn_close",
     markCurrentCodeBuddyTurnOutcome(traceContext, "interrupted", {

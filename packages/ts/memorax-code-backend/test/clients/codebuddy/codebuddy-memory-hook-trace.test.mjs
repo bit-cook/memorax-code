@@ -53,6 +53,7 @@ test("CodeBuddy runtime records completed turn lifecycle trace", async () => {
 
   const events = await readEvents(home, sessionId);
   assert.deepEqual(events.map((event) => event.type), ["turn_start", "turn_end", "turn_materialized"]);
+  assert.equal(events[0].source, "codebuddy-hook");
   assert.equal(events[1].outcome, "completed");
   assert.equal(events[2].source, "codebuddy-transcript");
   const current = JSON.parse(await readFile(codeBuddyTracePaths(home).sessionCurrentTurnPath(sessionId), "utf8"));

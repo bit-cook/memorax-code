@@ -80,6 +80,7 @@ export function createClaudeMemoryHookRuntime(
     writebackSource: "claude_hook_writeback",
     diagnosticPrefix: "claude_memory_hook",
     traceFailureEvent: "claude_trace.write_failed",
+    turnStartTraceSource: "claude-hook",
     deduplicateRetrieval: true,
   }, options);
   const { turnCoordinator } = memory;
@@ -283,7 +284,7 @@ async function recordClaudeTurnEnd(
       assistantMessage,
     },
   }), options.diagnosticLogger);
-  if (!recorded || (!recorded.written && recorded.reason !== "duplicate_event")) return recorded;
+  // Closing operational state must not depend on retaining its trace event.
   await recordTraceBestEffort("claude_memory_hook.current_turn_close", markCurrentClaudeTurnOutcome(
     traceContext,
     "completed",
@@ -420,7 +421,7 @@ async function recordClaudeInterruptedTurnEnd(
   traceContext: TraceContext,
   turn: ClaudeInterruptedTranscriptTurn,
 ): Promise<void> {
-  const recorded = await recordTraceBestEffort(
+  await recordTraceBestEffort(
     "claude_memory_hook.interrupted_turn_end_event",
     recordClaudeTraceEvent({
       eventId: traceTurnEventId(traceContext, "turn_end"),
@@ -445,7 +446,6 @@ async function recordClaudeInterruptedTurnEnd(
     }),
     options.diagnosticLogger,
   );
-  if (!recorded || (!recorded.written && recorded.reason !== "duplicate_event")) return;
   await recordTraceBestEffort(
     "claude_memory_hook.interrupted_current_turn_close",
     markCurrentClaudeTurnOutcome(traceContext, "interrupted", {

@@ -117,22 +117,24 @@ test("repo-user-profile-memory script performs add duplicate update delete with 
     const duplicate = runProfile("add", repo, [
       "--type", "communication",
       "--description", originalDescription,
-      "--applies-when", "Answering repo questions.",
+      "--applies-when", "Answering repo questions: reviews and debugging.",
+      "--do-not-apply-when", "User asks for English.",
     ]);
     assert.equal(duplicate.status, "duplicate");
     assert.equal(duplicate.id, added.id);
     assert.equal(duplicate.active_count, 1);
     assert.equal((readFileSync(preferences, "utf8").match(/^## Preference /gm) ?? []).length, 1);
 
-    const contentAlreadyPresent = runProfile("add", repo, [
+    const distinct = runProfile("add", repo, [
       "--type", "profile",
       "--description", "User prefers 中文 answers",
       "--applies-when", "Handling profile-related requests.",
     ]);
-    assert.equal(contentAlreadyPresent.status, "duplicate");
-    assert.equal(contentAlreadyPresent.id, added.id);
-    assert.equal(contentAlreadyPresent.active_count, 1);
-    assert.equal((readFileSync(preferences, "utf8").match(/^## Preference /gm) ?? []).length, 1);
+    assert.equal(distinct.status, "added");
+    assert.notEqual(distinct.id, added.id);
+    assert.equal(distinct.active_count, 2);
+    assert.equal((readFileSync(preferences, "utf8").match(/^## Preference /gm) ?? []).length, 2);
+    assert.equal(runProfile("delete", repo, ["--id", distinct.id]).active_count, 1);
 
     const updatedDescription = "User prefers detailed Chinese answers with reasons.";
     const updated = runProfile("update", repo, [
@@ -219,7 +221,7 @@ test("repo-user-profile-memory script keeps multiple entries isolated during upd
     const duplicate = runProfile("add", repo, [
       "--type", "workflow",
       "--description", "User prefers focused tests before broad validation.",
-      "--applies-when", "Choosing validation commands.",
+      "--applies-when", "Choosing validation commands after code changes.",
     ]);
     assert.equal(duplicate.status, "duplicate");
     assert.equal(duplicate.id, workflow.id);

@@ -281,6 +281,7 @@ async function fetchPrFacets(
   if (snapshotSha && state === "open") return [];
   const facets: JsonObject[] = [];
   const seenNumbers = new Set<number>();
+  // The limit counts retained PRs, so expand candidates past newer PRs outside the snapshot.
   let candidateLimit = Math.max(1, limit);
   let previousCandidateCount = -1;
   while (facets.length < limit) {

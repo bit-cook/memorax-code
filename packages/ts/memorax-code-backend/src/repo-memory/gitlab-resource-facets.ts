@@ -271,6 +271,7 @@ async function fetchMrFacets(
     }
     return facets.slice(0, limit);
   }
+  // The limit counts retained MRs; excluded snapshot candidates do not fill the window.
   let page = 1;
   while (facets.length < limit) {
     const requests = await runGlabApi(apiPath(repo, "merge_requests", {

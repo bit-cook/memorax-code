@@ -34,6 +34,8 @@ export class TrialProvisionFlowError extends Error {
 export async function ensureTrialCredentialReady(options = {}) {
   const context = validateOptions(options);
   try {
+    // Serialize the remote request through local completion so another setup
+    // cannot provision while the returned credential is still uncommitted.
     return await context.credentialPort.withProvisionLock(
       () => runTrialCredentialFlow(context),
       { timeoutMs: 30_000 },
@@ -49,6 +51,8 @@ export async function ensureTrialCredentialReady(options = {}) {
 
 async function runTrialCredentialFlow(context) {
   let record = await context.credentialPort.load();
+  // Persist the identity before the request and retain it on failure so a later
+  // attempt can replay the same provisioning identity.
   if (record === null) record = await createCredential(context);
   assertCredentialRecord(record);
   if (record.state === "ready") return readyResult(record, false);

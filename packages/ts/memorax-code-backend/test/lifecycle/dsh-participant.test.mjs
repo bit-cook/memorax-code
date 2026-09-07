@@ -240,6 +240,41 @@ test("failed DSH deselection restores every previously enabled Profile", async (
   }
 });
 
+test("failed client reselection retains restored DSH for unqualified cleanup", async () => {
+  const fixture = await createFixture();
+  const blockedCodeBuddyHome = join(fixture.root, "blocked-codebuddy-home");
+  writeFileSync(blockedCodeBuddyHome, "not a directory\n");
+  try {
+    const started = runCli(fixture, "start", ["--clients", "dsh"]);
+    assert.equal(started.status, 0, `${started.stdout}\n${started.stderr}`);
+
+    const failed = runCli(fixture, "start", [
+      "--clients", "codebuddy",
+      "--codebuddy-home", blockedCodeBuddyHome,
+    ]);
+    assert.equal(failed.status, 1, `${failed.stdout}\n${failed.stderr}`);
+    const report = JSON.parse(failed.stdout);
+    assert.equal(report.backend.reason, "codebuddy_adapter_enable_failed_backend_recovered");
+    assert.equal(report.backend.ok, true);
+    assert.equal(report.dshAdapter.enabled, true);
+    const activeClients = readJson(join(fixture.memoraxCodeHome, "runtime", "backend", "managed-clients.json"));
+    assert.equal(activeClients.dsh, true);
+    assert.equal(activeClients.codebuddy, true);
+
+    const stopped = runCli(fixture, "stop");
+    assert.equal(stopped.status, 0, `${stopped.stdout}\n${stopped.stderr}`);
+    const stoppedReport = JSON.parse(stopped.stdout);
+    assert.equal(stoppedReport.dshAdapter.enabled, false);
+    assert.equal(stoppedReport.codebuddyAdapter.ok, true);
+    assert.equal(readJson(fixture.statePath).enabled, false);
+    assert.equal(profileHasAdapter(fixture.profilePath), false);
+    assert.equal(existsSync(fixture.pidPath), false);
+  } finally {
+    runCli(fixture, "stop", ["--clients", "dsh,codebuddy"]);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("automatic DSH discovery degrades without a Profile while explicit selection stays strict", async () => {
   const fixture = await createFixture();
   try {

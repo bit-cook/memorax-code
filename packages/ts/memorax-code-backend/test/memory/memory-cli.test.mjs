@@ -132,40 +132,54 @@ test("memory CLI searches within a readable non-Git workspace scope", async () =
   assert.equal(requests[0].user_id, "user-1@notes");
 });
 
-test("memory CLI reuses the current non-Git turn scope from a nested cwd", async () => {
+test("memory CLI preserves non-Git turn scope across trace settings", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-cli-local-turn-"));
-  const memoraxCodeHome = join(root, "memorax-code-home");
+  t.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, "notes");
   const nested = join(workspace, "src");
   await mkdir(nested, { recursive: true });
-  await writeCurrentCodexTurn(traceContextFromHookBody({
-    session_id: "session-local-turn",
-    turn_id: "turn-local-turn",
-    cwd: workspace,
-  }), { memoraxCodeHome });
-  const requests = [];
-
-  const result = await runMemoryCli(["search", "--query", "nested workspace note"], {
-    cwd: nested,
-    env: {
+  for (const [enabled, captureContent] of [["true", "true"], ["false", "true"], ["true", "false"]]) {
+    const memoraxCodeHome = join(root, `home-${enabled}-${captureContent}`);
+    const env = {
       CODEX_THREAD_ID: "session-local-turn",
       MEMORAX_CODE_HOME: memoraxCodeHome,
       MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
       MEMORAX_CODE_MEMORAX_API_KEY: "secret",
       MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
-    },
-    fetchImpl: async (_url, init) => {
-      requests.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ success: true, data: { data: [] } }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    },
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.effectiveUserId, "user-1@notes");
-  assert.equal(requests[0].user_id, "user-1@notes");
+      MEMORAX_CODE_CODEX_TRACE_ENABLED: enabled,
+      MEMORAX_CODE_CODEX_TRACE_CAPTURE_CONTENT: captureContent,
+    };
+    await writeCurrentCodexTurn(traceContextFromHookBody({
+      session_id: "session-local-turn",
+      turn_id: "turn-local-turn",
+      cwd: workspace,
+    }), { memoraxCodeHome, env });
+    const requests = [];
+    const options = {
+      cwd: nested,
+      env,
+      fetchImpl: async (url, init) => {
+        requests.push(JSON.parse(init.body));
+        const data = String(url).endsWith("/add") ? { task_id: "scope-add", status: "queued" } : { data: [] };
+        return new Response(JSON.stringify({ success: true, data }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    };
+    const result = await runMemoryCli(["search", "--query", "nested workspace note"], options);
+    assert.equal(result.ok, true);
+    assert.equal(result.effectiveUserId, "user-1@notes", `trace enabled=${enabled}, captureContent=${captureContent}`);
+    assert.equal(requests[0].user_id, "user-1@notes");
+    if (enabled === "false") {
+      const added = await runMemoryCli([
+        "add", "--memory", "Keep the original workspace scope.", "--type", "procedural", "--reason", "Explicit test save.",
+      ], options);
+      assert.equal(added.ok, true);
+      assert.equal(added.effectiveUserId, "user-1@notes");
+      assert.equal(requests[1].user_id, "user-1@notes");
+    }
+  }
 });
 
 test("memory CLI rejects a nested repository outside the current turn scope", async () => {
@@ -368,34 +382,47 @@ test("memory CLI accepts a sibling linked worktree from the current turn reposit
   assert.equal(requests[0].user_id, "user-1@Project");
 });
 
-test("memory CLI uses Codex-General for a projectless current turn", async () => {
+test("memory CLI preserves projectless turn scope across trace settings", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-cli-projectless-"));
-  const memoraxCodeHome = join(root, "memorax-code-home");
+  t.after(() => rm(root, { recursive: true, force: true }));
   const taskRoot = join(root, "2026-07-13", "new-chat-2");
   const taskWork = join(taskRoot, "work");
   await mkdir(taskWork, { recursive: true });
-  await writeCurrentCodexTurn(traceContextFromHookBody({
-    session_id: "session-projectless",
-    turn_id: "turn-projectless",
-    cwd: taskRoot,
-    workspace_kind: "projectless",
-  }), { memoraxCodeHome });
-
-  const result = await runMemoryCli(["status"], {
-    cwd: taskWork,
-    env: {
+  for (const [enabled, captureContent] of [["true", "true"], ["false", "true"], ["true", "false"]]) {
+    const memoraxCodeHome = join(root, `home-${enabled}-${captureContent}`);
+    const env = {
       CODEX_THREAD_ID: "session-projectless",
       MEMORAX_CODE_HOME: memoraxCodeHome,
       MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
       MEMORAX_CODE_MEMORAX_API_KEY: "secret",
       MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
-    },
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.scopeKind, "codex-projectless");
-  assert.equal(result.workspace, "Codex-General");
-  assert.equal(result.effectiveUserId, "user-1@Codex-General");
+      MEMORAX_CODE_CODEX_TRACE_ENABLED: enabled,
+      MEMORAX_CODE_CODEX_TRACE_CAPTURE_CONTENT: captureContent,
+    };
+    await writeCurrentCodexTurn(traceContextFromHookBody({
+      session_id: "session-projectless",
+      turn_id: "turn-projectless",
+      cwd: taskRoot,
+      workspace_kind: "projectless",
+    }), { memoraxCodeHome, env });
+    const requests = [];
+    const result = await runMemoryCli(["search", "--query", "projectless scope"], {
+      cwd: taskWork,
+      env,
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ success: true, data: { data: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.scopeKind, "codex-projectless", `trace enabled=${enabled}, captureContent=${captureContent}`);
+    assert.equal(result.workspace, "Codex-General");
+    assert.equal(result.effectiveUserId, "user-1@Codex-General");
+    assert.equal(requests[0].user_id, "user-1@Codex-General");
+  }
 });
 
 test("memory CLI uses Codex-General when a projectless current turn has no cwd", async () => {
@@ -1244,7 +1271,7 @@ test("memory CLI add writes a Codex trace event from current turn bridge", async
   }
 });
 
-test("memory CLI search ignores stale or disabled current turn bridge without failing", async () => {
+test("memory CLI search tolerates missing or stale current-turn state", async () => {
   const requests = [];
   const server = createServer(async (req, res) => {
     const chunks = [];

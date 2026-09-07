@@ -636,8 +636,15 @@ test("Backend memory hook endpoints keep working when Codex trace is disabled", 
     assert.equal(writeback.status, 200);
     assert.deepEqual(await writeback.json(), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 1, "disabled trace hook writeback did not call MemoraX add");
-    await assert.rejects(readFile(tracePaths(sessionHome).currentTurnPath, "utf8"));
-    await assert.rejects(readFile(tracePaths(sessionHome).eventsJsonl("session-trace-disabled"), "utf8"));
+    const currentText = await readFile(tracePaths(sessionHome).currentTurnPath, "utf8");
+    const current = JSON.parse(currentText);
+    assert.equal(current.turn_state, "completed");
+    assert.equal(current.trace.client, "codex");
+    assert.equal(current.trace.session_id, "session-trace-disabled");
+    assert.equal(current.trace.turn_id, "turn-trace-disabled");
+    assert.doesNotMatch(currentText, /Trace disabled prompt|Trace disabled answer/);
+    await assert.rejects(readFile(tracePaths(sessionHome).traceJson("session-trace-disabled"), "utf8"), { code: "ENOENT" });
+    await assert.rejects(readFile(tracePaths(sessionHome).eventsJsonl("session-trace-disabled"), "utf8"), { code: "ENOENT" });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     globalThis.fetch = originalFetch;

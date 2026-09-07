@@ -155,6 +155,10 @@ For a manual update using a custom state root, pass its absolute path:
 memorax-code update --home /absolute/path/to/memorax-code-home
 ```
 
+Manual update resolves `--home` or `MEMORAX_CODE_HOME` relative to the caller's
+working directory before npm changes directories, and uses that same absolute
+root for package replacement and subsequent setup.
+
 A manual interactive update may offer newly available clients. Without
 completed setup, or when a manual update is non-interactive, package
 replacement can finish while the command directs you to run
@@ -191,6 +195,14 @@ disabled; restoration invokes `start` with the retained client selection.
 Fresh or stopped installations without retained DSH state remain stopped.
 Direct npm installation does not run foreground setup. Do not edit these
 runtime records by hand.
+
+After a failed restoration, `memorax-code update --recover [--home DIR]` resumes
+the installed package's start and status checks under the same transition lock.
+It accepts only a valid retired record and consumes it only after verification.
+Automatic restoration has a 15-minute freshness limit; explicit recovery also
+accepts older records, but rejects future timestamps. It leaves setup completion
+to `memorax-code setup`. See [package-transition recovery](troubleshooting.md#npm-package-transition-fails)
+for prerequisites and recovery steps.
 
 ## DeepSeek Harness integration paths
 
@@ -532,9 +544,20 @@ not an automatic maintenance runner.
 Depending on the enabled client capabilities, content capture can include
 prompts, responses, recalled memory, writeback content, reminder text, and
 local paths. Set `capture_content=false` for
-metadata-only local traces, or `enabled=false` to disable a client's trace.
+metadata-only local traces, or `enabled=false` to stop a client's event capture.
 Trace files stay under `$MEMORAX_CODE_HOME`; MemoraX Code has no trace upload,
 export, or public collector.
+
+The current-turn records remain available when event capture is disabled.
+They contain client, Session and Turn identity, workspace/native paths, and
+Turn status needed for CLI workspace association and exact recovery. They do
+not contain prompts, responses, or memory content. Session checks and freshness
+rules still apply, and inactive session directories remain subject to retention
+cleanup. Disabling event capture does not erase previously retained events.
+
+Changes to trace settings in `config.toml` apply to subsequent events, including
+re-enabling capture. Environment overrides still require restarting the process
+that inherited them.
 
 DSH trace contains only normalized lifecycle and memory-operation events. Its
 native Session Event Log and raw events remain local to DSH; MemoraX Code does

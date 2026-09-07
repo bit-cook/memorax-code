@@ -165,6 +165,7 @@ export function restoreEnv(name, value) {
 export function runCli(cliPath, args, options = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [cliPath, ...args], {
+      cwd: options.cwd,
       env: { ...process.env, ...(options.env ?? {}) },
       stdio: ["pipe", "pipe", "pipe"],
     });

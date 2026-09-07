@@ -33,6 +33,7 @@ switch (behavior) {
 writeFileSync(finalMessagePath, "Fixture runner completed.\n");
 if (process.env.REPO_MEMORY_TEST_ENV_LOG) {
   writeFileSync(process.env.REPO_MEMORY_TEST_ENV_LOG, JSON.stringify({
+    memoraxCodeHome: process.env.MEMORAX_CODE_HOME,
     kind: process.env.MEMORAX_CODE_REPO_MEMORY_JOB_KIND,
     jobId: process.env.MEMORAX_CODE_REPO_MEMORY_JOB_ID,
     runId: process.env.MEMORAX_CODE_REPO_MEMORY_JOB_RUN_ID,

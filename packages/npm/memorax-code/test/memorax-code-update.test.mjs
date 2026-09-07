@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,26 +90,34 @@ test("memorax-code update supports explicit channel selection and force", async 
   }
 });
 
-test("memorax-code update rejects conflicting channels", async () => {
+test("memorax-code update rejects conflicting channels and recovery options", async () => {
   const root = await createPackageFixture("0.0.1-preview.1");
   try {
     const result = runUpdate(root, "--preview", "--latest", "--dry-run");
     assert.equal(result.status, 2);
     assert.match(result.stderr, /--preview and --latest cannot be used together/);
+    for (const option of ["--preview", "--latest", "--force", "--dry-run", "--automatic"]) {
+      const recovery = runUpdate(root, "--recover", option);
+      assert.equal(recovery.status, 2);
+      assert.match(recovery.stderr, /--recover cannot be combined/);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("memorax-code update propagates an explicit home to package transition scripts", {
+test("memorax-code update resolves argument and environment homes before npm changes cwd", {
   skip: process.platform === "win32",
 }, async () => {
-  const root = await createPackageFixture("0.0.1");
+  const root = await realpath(await createPackageFixture("0.0.1"));
   const fakeBin = join(root, "fake-bin");
   const capturePath = join(root, "npm-invocation.json");
-  const memoraxCodeHome = join(root, "custom memorax-code home");
+  const userHome = join(root, "user-home");
+  const relativeHome = "./custom memorax-code home";
+  const memoraxCodeHome = join(root, relativeHome);
   try {
     await mkdir(fakeBin, { recursive: true });
+    await mkdir(userHome, { recursive: true });
     const npmStub = join(fakeBin, "npm");
     const npmStubModule = `${npmStub}.mjs`;
     await writeFile(npmStubModule, [
@@ -117,6 +125,7 @@ test("memorax-code update propagates an explicit home to package transition scri
       "import { writeFileSync } from 'node:fs';",
       "writeFileSync(process.env.MEMORAX_CODE_UPDATE_CAPTURE, JSON.stringify({",
       "  args: process.argv.slice(2),",
+      "  cwd: process.cwd(),",
       "  memoraxCodeHome: process.env.MEMORAX_CODE_HOME,",
       "}));",
       "",
@@ -124,28 +133,36 @@ test("memorax-code update propagates an explicit home to package transition scri
     await chmod(npmStubModule, 0o755);
     await symlink(basename(npmStubModule), npmStub);
 
-    const result = spawnSync(
-      process.execPath,
-      [join(root, "bin", "memorax-code.mjs"), "update", "--home", memoraxCodeHome],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
-          MEMORAX_CODE_UPDATE_CAPTURE: capturePath,
-          MEMORAX_CODE_HOME: join(root, "wrong-home"),
+    for (const [args, envHome] of [
+      [["--home", relativeHome], join(root, "wrong-home")],
+      [[], relativeHome],
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [join(root, "bin", "memorax-code.mjs"), "update", ...args],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: userHome,
+            PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+            MEMORAX_CODE_UPDATE_CAPTURE: capturePath,
+            MEMORAX_CODE_HOME: envHome,
+          },
         },
-      },
-    );
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(await readFile(capturePath, "utf8")), {
-      args: [
-        "install",
-        "-g",
-        "@memorax/memorax-code@latest",
-      ],
-      memoraxCodeHome,
-    });
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(await readFile(capturePath, "utf8")), {
+        args: [
+          "install",
+          "-g",
+          "@memorax/memorax-code@latest",
+        ],
+        cwd: userHome,
+        memoraxCodeHome,
+      });
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
