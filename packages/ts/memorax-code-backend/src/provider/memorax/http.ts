@@ -33,6 +33,7 @@ export async function postMemoraxJson(
   fetchImpl: typeof fetch,
 ): Promise<MemoraxJsonResponse> {
   const controller = new AbortController();
+  // The deadline covers headers and body; HTTP success alone is not acceptance.
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
     const response = await fetchImpl(`${config.baseUrl}${path}`, {
@@ -46,13 +47,22 @@ export async function postMemoraxJson(
     });
     if (!response.ok) {
       const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+      // Error bodies may echo private input. Let the caller retry from status
+      // and Retry-After without including that content in diagnostics.
       await response.arrayBuffer().catch(() => undefined);
       throw createMemoraxRequestError(`MemoraX HTTP ${response.status}`, "http", {
         status: response.status,
         retryAfterMs,
       });
     }
-    const body = await response.json().catch(() => null);
+    const body = await response.json().catch((error: unknown) => {
+      // SyntaxError messages can include response fragments. Preserve body
+      // timeout/transport failures so the caller's retry policy still applies.
+      if (error instanceof SyntaxError) {
+        throw createMemoraxRequestError("MemoraX response body must be valid JSON", "response");
+      }
+      throw error;
+    });
     validateMemoraxEnvelope(body);
     const featureCode = path === "/v1/memories/add"
       ? "memory_write"

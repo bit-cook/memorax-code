@@ -398,6 +398,7 @@ function buildMemoraxAddPayload(
     ...(options.contentType ? { content_type: options.contentType } : {}),
     ...(chunk ? { chunk } : {}),
     session_id: memoraxSessionIdForRun(run),
+    // Acceptance acknowledges task submission, not completed memory extraction.
     async_mode: true,
     timestamp: stamped[0]?.timestamp ?? now,
     metadata: {

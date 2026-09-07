@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -271,6 +272,36 @@ test("CLI help lists the current diagnostics", () => {
   const result = runCli(["--help"]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /status\|doctor\|inspect-history/);
+});
+
+test("Codex doctor reports an unavailable Backend when health headers stall", async () => {
+  const { root, codexHome, memoraxCodeHome } = await fixture("memorax-code-codex-doctor-timeout-");
+  const server = createServer((_request, response) => {
+    const timer = setTimeout(() => response.end(JSON.stringify({
+      ok: true,
+      service: "memorax-code-backend",
+    })), 7_000);
+    response.once("close", () => clearTimeout(timer));
+  });
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const result = await runCliAsync([
+      "doctor",
+      "--codex-home", codexHome,
+      "--memorax-code-home", memoraxCodeHome,
+      "--backend-url", `http://127.0.0.1:${server.address().port}`,
+      "--json",
+    ]);
+    assert.equal(result.code, 1, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.action, "doctor");
+    assert.equal(payload.backend.ok, false);
+    assert.match(payload.backend.error, /timeout/i);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Codex diagnostics CLI rejects unknown commands", () => {

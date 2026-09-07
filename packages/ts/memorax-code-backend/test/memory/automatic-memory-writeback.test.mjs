@@ -296,37 +296,50 @@ test("automatic memory writeback namespaces single-turn dedupe by client", async
   }
 });
 
-test("automatic memory writeback retries a retryable provider failure", async () => {
-  const requests = [];
-  const events = [];
-  const runtime = createAutomaticMemoryWritebackRuntime();
-  const fetchImpl = async (url, init) => {
-    requests.push({ url: String(url), body: JSON.parse(init.body) });
-    if (requests.length === 1) {
-      return new Response("", { status: 503, headers: { "retry-after": "0" } });
-    }
-    return memoraxSuccessResponse("automatic-memory-retry");
-  };
-  try {
-    runtime.enqueue({
-      client: "claude-code",
-      sessionKey: "session-automatic-retry",
-      userText: "Retry this automatic turn.",
-      assistantText: "The retry succeeded.",
-      repositoryScope: REPOSITORY_SCOPE,
-      env: WRITEBACK_ENV,
-      fetchImpl,
-      memoryObservability: { recordEvent: (event) => events.push(event) },
-      memoryObservabilitySource: "claude_hook_writeback",
-    });
+test("automatic memory writeback retries a retryable provider failure", async (t) => {
+  for (const [name, firstResponse] of [
+    ["HTTP 503", () => new Response("", { status: 503, headers: { "retry-after": "0" } })],
+    ["response body transport failure", () => new Response(new ReadableStream({
+      pull(controller) { controller.error(new TypeError("response body interrupted")); },
+    }))],
+    ["response body abort", () => new Response(new ReadableStream({
+      pull(controller) { controller.error(new DOMException("response body aborted", "AbortError")); },
+    }))],
+  ]) {
+    await t.test(name, async () => {
+      const requests = [];
+      const events = [];
+      const runtime = createAutomaticMemoryWritebackRuntime();
+      const fetchImpl = async (url, init) => {
+        requests.push({ url: String(url), body: JSON.parse(init.body) });
+        return requests.length === 1
+          ? firstResponse()
+          : memoraxSuccessResponse("automatic-memory-retry");
+      };
+      try {
+        runtime.enqueue({
+          client: "claude-code",
+          sessionKey: "session-automatic-retry",
+          userText: "Retry this automatic turn.",
+          assistantText: "The retry succeeded.",
+          repositoryScope: REPOSITORY_SCOPE,
+          env: WRITEBACK_ENV,
+          fetchImpl,
+          memoryObservability: { recordEvent: (event) => events.push(event) },
+          memoryObservabilitySource: "claude_hook_writeback",
+        });
 
-    await waitFor(() => requests.length === 2 && events.length === 2, "automatic writeback retry did not settle");
-    assert.deepEqual(events.map((event) => event.ok), [false, true]);
-    assert.deepEqual(events.map((event) => event.request.attempt), [1, 2]);
-    assert.equal(events.every((event) => event.source === "claude_hook_writeback"), true);
-    assert.equal(requests[0].body.metadata.idempotency_key, requests[1].body.metadata.idempotency_key);
-  } finally {
-    runtime.close();
+        await waitFor(() => events.length >= 1, "first provider response did not settle");
+        assert.equal(events[0].ok, false);
+        await waitFor(() => requests.length === 2 && events.length === 2, "automatic writeback retry did not settle");
+        assert.deepEqual(events.map((event) => event.ok), [false, true]);
+        assert.deepEqual(events.map((event) => event.request.attempt), [1, 2]);
+        assert.equal(events.every((event) => event.source === "claude_hook_writeback"), true);
+        assert.equal(requests[0].body.metadata.idempotency_key, requests[1].body.metadata.idempotency_key);
+      } finally {
+        runtime.close();
+      }
+    });
   }
 });
 

@@ -10,6 +10,8 @@ export async function postBackendCommand({
 }) {
   const headers = { "content-type": "application/json", connection: "close" };
   if (connection.token) headers["x-memorax-code-backend-token"] = connection.token;
+  // This signal also bounds the caller's response-body read. Cancellation does
+  // not undo an accepted command, so this transport must not retry it.
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   return await fetchImpl(new URL(path, connection.url), {
     method: "POST",

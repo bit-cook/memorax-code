@@ -683,42 +683,91 @@ test("MemoraX adapter redacts HTTP error response bodies", async () => {
   }
 });
 
-test("MemoraX adapter preserves timeout failures as structured errors", async () => {
-  const result = await invokeMemoraxMemoryProvider(
-    { sessionId: "session-timeout", prompt: "fallback prompt" },
-    {
-      provider_id: "memory.memorax",
-      slot: "state_context",
-      operation: "query",
-      query: "project memory",
-    },
-    {
-      config: {
-        baseUrl: "http://memorax.test",
-        apiKey: "secret",
-        userId: "user-1",
-        topK: 6,
-        timeoutMs: 10,
-        maxContextChars: 4000,
-        maxItemChars: 1000,
-        memoryTypeOrder: ["core", "procedural", "unclassified"],
-        renderByMemoryType: true,
-      },
-      repositoryScope: testRepositoryScope(),
-      fetchImpl: async (_url, init) => await new Promise((_, reject) => {
-        init.signal.addEventListener("abort", () => {
-          const error = new Error("request aborted");
-          error.name = "AbortError";
-          reject(error);
-        }, { once: true });
-      }),
-    },
-  );
-
-  assert.equal(result.ok, false);
-  assert.equal(result.errorKind, "timeout");
-  assert.equal(result.httpStatus, undefined);
+test("MemoraX adapter rejects malformed successful responses without exposing their contents", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('private-response-content {"incomplete":');
+  });
+  const baseUrl = await listen(server);
+  try {
+    for (const operation of ["query", "writeback"]) {
+      const events = [];
+      const result = await invokeMemoraxMemoryProvider(
+        { sessionId: "invalid-response", prompt: "test prompt" },
+        {
+          operation,
+          query: "project memory",
+          content: "Remember this test.",
+          context: { idempotencyKey: "invalid-response:turn-1" },
+        },
+        {
+          env: {
+            MEMORAX_CODE_MEMORAX_ENDPOINT: baseUrl,
+            MEMORAX_CODE_MEMORAX_API_KEY: "test-key",
+            MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
+          },
+          repositoryScope: testRepositoryScope(),
+          observability: { recordEvent: (event) => events.push(event) },
+        },
+      );
+      assert.equal(result.ok, false, operation);
+      assert.equal(result.errorKind, "response");
+      assert.equal(result.error, "MemoraX response body must be valid JSON");
+      assert.equal(events.length, 1);
+      assert.equal(events[0].ok, false);
+      assert.doesNotMatch(JSON.stringify({ result, events }), /private-response-content|incomplete/);
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
+
+for (const [phase, operation] of [["headers", "query"], ["body", "writeback"]]) {
+  test(`MemoraX adapter preserves ${phase} timeout failures as structured errors`, async () => {
+    const result = await invokeMemoraxMemoryProvider(
+      { sessionId: "session-timeout", prompt: "fallback prompt" },
+      {
+        provider_id: "memory.memorax",
+        slot: "state_context",
+        operation,
+        query: "project memory",
+        content: "Remember this test.",
+        context: { idempotencyKey: "body-timeout:turn-1" },
+      },
+      {
+        config: {
+          baseUrl: "http://memorax.test",
+          apiKey: "secret",
+          userId: "user-1",
+          topK: 6,
+          timeoutMs: 10,
+          maxContextChars: 4000,
+          maxItemChars: 1000,
+          memoryTypeOrder: ["core", "procedural", "unclassified"],
+          renderByMemoryType: true,
+        },
+        repositoryScope: testRepositoryScope(),
+        fetchImpl: async (_url, init) => {
+          if (phase === "headers") {
+            return await new Promise((_, reject) => {
+              init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+            });
+          }
+          return new Response(new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"partial":'));
+              init.signal.addEventListener("abort", () => controller.error(init.signal.reason), { once: true });
+            },
+          }), { status: 200 });
+        },
+      },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errorKind, "timeout");
+    assert.equal(result.httpStatus, undefined);
+  });
+}
 
 test("MemoraX adapter preserves prebuilt code evidence packs", async () => {
   const requests = [];
