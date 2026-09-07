@@ -3,6 +3,8 @@ import { dirname, join } from "node:path";
 import type { ManagedClients } from "./client-selection.js";
 import { LIFECYCLE_CLIENTS } from "./client-reports.js";
 
+// This marker conservatively tracks cleanup scope, including partially prepared
+// clients. Readiness is checked separately; mutations require the lifecycle lock.
 export function readActiveManagedClients(memoraxCodeHome: string): ManagedClients | undefined {
   const path = activeManagedClientsPath(memoraxCodeHome);
   if (!existsSync(path)) return undefined;
