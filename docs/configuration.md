@@ -155,6 +155,10 @@ For a manual update using a custom state root, pass its absolute path:
 memorax-code update --home /absolute/path/to/memorax-code-home
 ```
 
+Manual update resolves `--home` or `MEMORAX_CODE_HOME` relative to the caller's
+working directory before npm changes directories, and uses that same absolute
+root for package replacement and subsequent setup.
+
 A manual interactive update may offer newly available clients. Without
 completed setup, or when a manual update is non-interactive, package
 replacement can finish while the command directs you to run
@@ -191,6 +195,14 @@ disabled; restoration invokes `start` with the retained client selection.
 Fresh or stopped installations without retained DSH state remain stopped.
 Direct npm installation does not run foreground setup. Do not edit these
 runtime records by hand.
+
+After a failed restoration, `memorax-code update --recover [--home DIR]` resumes
+the installed package's start and status checks under the same transition lock.
+It accepts only a valid retired record and consumes it only after verification.
+Automatic restoration has a 15-minute freshness limit; explicit recovery also
+accepts older records, but rejects future timestamps. It leaves setup completion
+to `memorax-code setup`. See [package-transition recovery](troubleshooting.md#npm-package-transition-fails)
+for prerequisites and recovery steps.
 
 ## DeepSeek Harness integration paths
 

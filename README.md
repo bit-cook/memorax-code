@@ -286,6 +286,8 @@ See [update settings](docs/configuration.md#setup-automatic-update-and-package-t
 for release channels, custom state roots, client selection, Backend restoration,
 and disabling background checks. Restart or refresh a client after an update
 changes integration assets it has already loaded.
+If package replacement fails, follow the [update recovery steps](docs/troubleshooting.md#npm-package-transition-fails)
+for `memorax-code update --recover`.
 
 ### Windows Upgrade Note
 

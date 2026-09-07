@@ -239,6 +239,8 @@ memorax-code update
 再按保留的客户端选择恢复。发布通道、自定义状态目录、客户端选择、Backend 恢复规则和关闭后台检查
 的方法见[更新配置](docs/configuration.md#setup-automatic-update-and-package-transition-state)。
 如果更新修改了运行中客户端已加载的集成资产，请重启或刷新客户端。
+如果包替换失败，请按[更新恢复步骤](docs/troubleshooting.md#npm-package-transition-fails)
+使用 `memorax-code update --recover`。
 
 ### Windows 升级提示
 

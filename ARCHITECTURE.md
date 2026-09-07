@@ -215,6 +215,12 @@ sequenceDiagram
     NPM->>Lifecycle: restore and verify managed runtime
     NPM->>Transition: consume only after successful status
   end
+  opt explicit recovery after failed restoration
+    User->>Setup: update --recover
+    Setup->>Transition: lock and validate retired record
+    Setup->>Lifecycle: restore and verify installed package
+    Setup->>Transition: consume only after successful status
+  end
 
   User->>Setup: interactive setup
   Setup->>Generation: stage immutable Hook runtime
@@ -257,6 +263,12 @@ succeeds. Retained DSH state also triggers retirement and restoration, even
 without a live Backend PID or when that state is disabled. Fresh or stopped
 installations without retained DSH state remain stopped. npm lifecycle never
 detects new clients, accepts credentials, or authorizes Hooks.
+
+Explicit `memorax-code update --recover` reuses package-transition restoration
+and its lock for the already installed package. The user's recovery request
+permits an expired retired record; unattended npm restoration retains its
+freshness limit. Both paths reject incomplete retirement, invalid records, and
+future timestamps, and consume state only after successful start and status.
 
 Public `memorax-code setup` owns disclosure, preferences, credential
 provisioning or entry, client discovery, initial Hook activation, and Backend
