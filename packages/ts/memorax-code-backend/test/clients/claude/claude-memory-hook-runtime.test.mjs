@@ -367,6 +367,7 @@ test("Claude Hooks persist the same immediate trace lifecycle as Codex Hooks", a
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.deepEqual(events.map((event) => event.type), ["turn_start", "turn_end"]);
+    assert.equal(events[0].source, "claude-hook");
     assert.equal(events[0].trace.client, "claude");
     assert.equal(events[0].trace.turn_id, PROMPT_ID);
     assert.equal(events[0].trace.context_origin, "claude-hook-body");

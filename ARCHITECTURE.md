@@ -826,7 +826,8 @@ and
 | Automatic update cadence | Versioned private automatic-update record plus its bounded lock | Managed Backend timer state or client process lifetime |
 | Quota reminders | Versioned private local runtime record keyed by a one-way connection fingerprint for deduplication; normalized MemoraX balances for the quota amount; a ready secure trial record matching the active API key for optional anonymous Mark ID text | Account registration status, raw API keys, and in-memory reminder state are not quota-reminder authority |
 | MemoraX memory results and Add acceptance | Normalized response from `provider/memorax` | Observability and trace |
-| Persisted current-turn operational state and trace history | Client-qualified local trace records | Diagnostics; not native content or general Turn-identity authority |
+| Persisted current-turn operational state | Client-qualified current-turn records with Session and Turn checks | CLI workspace association and exact recovery; native content is independently validated |
+| Trace history | Client-qualified local trace events | Diagnostics; not native content or general Turn-identity authority |
 | Repo Memory bundle | Repository-local `.repo_memory` files authored through explicit Skill operations or supervised jobs | Backend readiness and client-injected guidance |
 
 #### Native writeback authority
@@ -902,6 +903,14 @@ their local records; CLI composition supplies its own observability hook.
 These paths are not all mediated by `app/memory-observability`. Memory-service
 kernels receive Backend diagnostics through a port; CLI composition can use
 the Backend debug logger directly.
+
+Current-turn records share the trace Store and existing paths but serve an
+operational role. Their read, write, and outcome updates are independent of
+`trace.enabled`, so disabling event capture does not change CLI workspace scope
+or remove exact recovery context. They retain only identity, path, and lifecycle
+metadata; Session checks, freshness checks, and session retention still apply.
+The observability sink checks the effective trace configuration for each event
+rather than freezing the enabled clients at Backend startup.
 
 Raw native transcript files, transcript paths, and retained trace files stay
 local. Only normalized Search and Add requests cross the MemoraX

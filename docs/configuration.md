@@ -544,9 +544,20 @@ not an automatic maintenance runner.
 Depending on the enabled client capabilities, content capture can include
 prompts, responses, recalled memory, writeback content, reminder text, and
 local paths. Set `capture_content=false` for
-metadata-only local traces, or `enabled=false` to disable a client's trace.
+metadata-only local traces, or `enabled=false` to stop a client's event capture.
 Trace files stay under `$MEMORAX_CODE_HOME`; MemoraX Code has no trace upload,
 export, or public collector.
+
+The current-turn records remain available when event capture is disabled.
+They contain client, Session and Turn identity, workspace/native paths, and
+Turn status needed for CLI workspace association and exact recovery. They do
+not contain prompts, responses, or memory content. Session checks and freshness
+rules still apply, and inactive session directories remain subject to retention
+cleanup. Disabling event capture does not erase previously retained events.
+
+Changes to trace settings in `config.toml` apply to subsequent events, including
+re-enabling capture. Environment overrides still require restarting the process
+that inherited them.
 
 DSH trace contains only normalized lifecycle and memory-operation events. Its
 native Session Event Log and raw events remain local to DSH; MemoraX Code does

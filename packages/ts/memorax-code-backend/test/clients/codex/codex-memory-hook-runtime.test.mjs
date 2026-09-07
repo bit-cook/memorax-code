@@ -609,7 +609,7 @@ test("memory hook maps different Codex projectless task directories to Codex-Gen
   }
 });
 
-test("memory hook restores exact projectless scope from current-turn trace after runtime restart", async () => {
+test("memory hook restores exact projectless scope from current-turn state after restart with trace disabled", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-projectless-restart-"));
   const memoraxCodeHome = join(root, "home");
   const workspace = join(root, "projectless-task");
@@ -622,7 +622,7 @@ test("memory hook restores exact projectless scope from current-turn trace after
   const env = {
     ...WRITEBACK_ENV,
     MEMORAX_CODE_HOME: memoraxCodeHome,
-    MEMORAX_CODE_CODEX_TRACE_ENABLED: "true",
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
   };
   const { fetchImpl, requests } = memoraxAddFetch();
   const first = createCodexMemoryHookRuntime({ env, fetchImpl });
@@ -647,6 +647,10 @@ test("memory hook restores exact projectless scope from current-turn trace after
     }), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 1, "restarted Hook did not restore projectless scope");
     assert.equal(requests[0].body.user_id, "user-1@Codex-General");
+    const current = JSON.parse(await readFile(
+      tracePaths(memoraxCodeHome).sessionCurrentTurnPath("session-projectless-restart"), "utf8",
+    ));
+    assert.equal(current.turn_state, "completed");
   } finally {
     restarted.close();
     await rm(root, { recursive: true, force: true });
@@ -755,7 +759,7 @@ test("memory hook fails closed after restart when no exact scope authority exist
   const env = {
     ...WRITEBACK_ENV,
     MEMORAX_CODE_HOME: join(root, "home"),
-    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "true",
   };
   const { fetchImpl, requests } = memoraxAddFetch();
   const first = createCodexMemoryHookRuntime({ env, fetchImpl });
@@ -768,6 +772,11 @@ test("memory hook fails closed after restart when no exact scope authority exist
     transcriptPath,
   });
   first.close();
+  const paths = tracePaths(env.MEMORAX_CODE_HOME);
+  await Promise.all([
+    rm(paths.currentTurnPath),
+    rm(paths.sessionCurrentTurnPath("session-scope-restart-unavailable")),
+  ]);
 
   const restarted = createCodexMemoryHookRuntime({ env, fetchImpl });
   try {

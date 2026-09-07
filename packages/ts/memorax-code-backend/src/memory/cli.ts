@@ -263,6 +263,8 @@ async function resolveMemoryCliRepositoryMemory(options: MemoryCliOptions): Prom
   let turnMemory: ConfiguredRepositoryMemoryResult | undefined;
   const traceBinding = memoryCliTraceBinding(env);
   if (traceBinding?.expectedSessionId) {
+    // This bridge carries operational workspace identity even when event tracing is disabled.
+    // Bind it to the exact client/session; cwd alone cannot recover projectless or parent-folder scope.
     const current = await readCurrentTraceTurn({
       client: traceBinding.client,
       memoraxCodeHome,
@@ -369,6 +371,7 @@ async function memoryCliObservability(
 ): Promise<MemoryCliObservability> {
   const memoraxCodeHome = defaultMemoraxCodeHome(env);
   const traceBinding = memoryCliTraceBinding(env);
+  // Capture once before provider I/O so a later prompt cannot claim this command's events.
   const current = traceBinding
     ? await readCurrentTraceTurn({
       client: traceBinding.client,

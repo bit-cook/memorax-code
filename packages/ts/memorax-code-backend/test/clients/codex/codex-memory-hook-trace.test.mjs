@@ -51,6 +51,7 @@ test("memory hook observes a Codex start without turn identity without consuming
       .trim().split("\n").map((line) => JSON.parse(line));
     assert.equal(events.length, 1);
     assert.equal(events[0].type, "turn_start");
+    assert.equal(events[0].source, "codex-hook");
     assert.equal(events[0].trace.session_id, sessionId);
     assert.equal(events[0].trace.turn_id, undefined);
     assert.equal(events[0].request.prompt, "Observe this start without guessing its turn.");

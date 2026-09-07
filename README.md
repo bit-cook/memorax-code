@@ -253,6 +253,8 @@ client capabilities, retained traces under `MEMORAX_CODE_HOME` may contain
 prompts, responses, recalled memory, reminder text, and local paths. Use the
 [local trace settings](docs/configuration.md#local-traces) to switch to
 metadata-only capture or disable a client's trace.
+Minimal local session state remains when trace is disabled so memory operations
+keep the correct workspace scope.
 
 Guest quota reminders may display the complete Mark ID. Treat reminder text
 and retained traces containing it as sensitive.

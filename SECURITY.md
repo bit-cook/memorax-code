@@ -226,6 +226,12 @@ Trace files stay under `MEMORAX_CODE_HOME`. The shipped package has no trace
 uploader, collector, receiver, or export command. This does not change the
 separate MemoraX queries and writeback described above.
 
+Disabling trace event capture preserves current-turn operational records for
+client/session identity, workspace association, and exact recovery. These local
+records may include workspace and native transcript paths, but no prompts,
+responses, or memory content. Session validation and retention cleanup remain
+active; the trace switch does not erase previously retained data.
+
 The DSH Session Event Log remains client-owned native history and is read only
 for the exact Turn interval. MemoraX Code records normalized DSH trace events
 but does not copy the raw log or its path into retained trace.

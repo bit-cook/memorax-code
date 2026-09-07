@@ -93,6 +93,7 @@ export function createCodexMemoryHookRuntime(options: CodexMemoryHookRuntimeOpti
     writebackSource: "codex_hook_writeback",
     diagnosticPrefix: "memory_hook",
     traceFailureEvent: "codex_trace.write_failed",
+    turnStartTraceSource: "codex-hook",
     deduplicateRetrieval: true,
   }, options);
   const { turnCoordinator } = memory;
@@ -402,8 +403,7 @@ async function recordTurnEnd(
     },
     ...(details.occurredAt ? { now: () => new Date(details.occurredAt as string) } : {}),
   }), options.diagnosticLogger);
-  if (!recorded || (!recorded.written && recorded.reason !== "duplicate_event")) return;
-  if (!recorded.written && details.rollout && eventId) {
+  if (recorded && !recorded.written && recorded.reason === "duplicate_event" && details.rollout && eventId) {
     await recordTraceBestEffort("memory_hook.turn_materialized_event", recordCodexTraceEvent({
       eventId: traceTurnEventId(traceContext, "turn_materialized"),
       memoraxCodeHome: options.memoraxCodeHome,
@@ -427,6 +427,7 @@ async function recordTurnEnd(
       ...(details.occurredAt ? { now: () => new Date(details.occurredAt as string) } : {}),
     }), options.diagnosticLogger);
   }
+  // Closing operational state must not depend on retaining its trace event.
   await recordTraceBestEffort("memory_hook.current_turn_close", markCurrentCodexTurnOutcome(
     traceContext,
     outcome,
