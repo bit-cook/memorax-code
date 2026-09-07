@@ -361,6 +361,7 @@ function expectedPluginVersion() {
   return version;
 }
 
+// Runtime generations can change without refreshing the native shell loaded by active sessions.
 function installedPluginShellIsCurrent(plugin, expectedVersion) {
   if (!plugin
     || plugin.version !== expectedVersion

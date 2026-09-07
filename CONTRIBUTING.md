@@ -298,6 +298,13 @@ and explain any relevant checks not run. Public fixtures must never contain
 real API keys, private transcripts, personal memory, or infrastructure
 credentials.
 
+The default `npm-package-check` uses a synthetic Claude plugin CLI for its
+installation smoke test; it does not require a local Claude installation.
+This verifies the packaged integration and lifecycle, not real-client behavior.
+`make npm-publish-dry-run` and direct invocation of
+`scripts/npm-publish-dry-run.sh` both check release-version consistency before
+building or invoking npm's dry-run.
+
 ## Pull Requests
 
 A pull request should:

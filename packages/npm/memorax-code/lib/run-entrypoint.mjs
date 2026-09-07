@@ -66,6 +66,7 @@ export async function runBackendEntrypoint(relativeEntrypoint) {
   ensureInstallWatchdogEnv();
   ensureNpmPackageRuntimeEnv();
   const entrypoint = join(packageRoot, "lib", "memorax-code-backend", "dist", relativeEntrypoint);
+  // Preserve the Backend entrypoint's main-module check when imported through an npm wrapper.
   const previousArgv1 = process.argv[1];
   process.argv[1] = entrypoint;
   try {

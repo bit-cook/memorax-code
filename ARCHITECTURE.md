@@ -975,6 +975,11 @@ phases of the same build; packed-file and extracted-tarball checks run after
   to locate staged Backend and adapter entrypoints.
 - Artifact gates reject undeclared paths, unsafe symlinks, cache/build debris,
   and local-only data-boundary violations.
+- Build, extracted-tarball, and installed-package checks share the required
+  artifact contract in `scripts/npm-package-layout.mjs`: declared public
+  commands, plugin manifests, shared Skill launchers, and key process
+  entrypoints. Source mappings cover internal files; the publish allowlist
+  remains a separate restriction on permitted paths.
 - Run installed-package checks in the
   [isolated development environment](CONTRIBUTING.md#isolated-development-environment).
   Inherited client-home, alias, and command overrides must not select developer
