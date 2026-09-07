@@ -37,7 +37,7 @@ interface AuthState {
   login_hint: string;
 }
 
-export function prepareRepoMemory(repoValue: string, reuse: boolean): Record<string, unknown> {
+export function prepareRepoMemory(repoValue: string, reuse: boolean, inspectProvider = true): Record<string, unknown> {
   const repo = canonicalPath(repoValue);
   if (!existsSync(repo)) throw new RepoMemoryError(`Repository path does not exist: ${repo}`);
   if (!commandAvailable("git")) throw new RepoMemoryError("git is required but was not found on PATH");
@@ -56,8 +56,9 @@ export function prepareRepoMemory(repoValue: string, reuse: boolean): Record<str
   const gitignoreUpdated = ensureRepoMemoryGitignore(repo);
   const ghHost = remote.provider === "github" ? remote.host : "";
   const glabHost = remote.provider === "gitlab" ? remote.host : "";
-  const ghState = cliAuthState("gh", authArgs("gh", ghHost), loginHint("gh", ghHost));
-  const glabState = cliAuthState("glab", authArgs("glab", glabHost), loginHint("glab", glabHost));
+  // Local-only collection must also skip authentication probes during preparation.
+  const ghState = cliAuthState("gh", authArgs("gh", ghHost), loginHint("gh", ghHost), inspectProvider);
+  const glabState = cliAuthState("glab", authArgs("glab", glabHost), loginHint("glab", glabHost), inspectProvider);
   const providerReport = providerCliReport(remote.provider, ghState, glabState);
   const report: Record<string, unknown> = {
     prepared_at: new Date().toISOString(),
@@ -97,7 +98,7 @@ export function prepareRepoMemory(repoValue: string, reuse: boolean): Record<str
   return report;
 }
 
-export function executePrepare(args: string[]): CommandOutput {
+export function executePrepare(args: string[], inspectProvider = true): CommandOutput {
   try {
     let repo = ".";
     let repoSeen = false;
@@ -117,7 +118,7 @@ export function executePrepare(args: string[]): CommandOutput {
         repoSeen = true;
       }
     }
-    return commandOutput(prepareRepoMemory(repo, reuse), true);
+    return commandOutput(prepareRepoMemory(repo, reuse, inspectProvider), true);
   } catch (error) {
     return failedOutput(error);
   }
@@ -208,8 +209,12 @@ function loginHint(command: string, host: string): string {
     : `${command} auth login`;
 }
 
-function cliAuthState(command: string, args: string[], hint: string): AuthState {
-  if (!commandAvailable(command)) {
+function cliAuthState(command: string, args: string[], hint: string, inspect: boolean): AuthState {
+  const available = commandAvailable(command);
+  if (!inspect) {
+    return { available, authenticated: false, auth_status: "skipped_by_policy", auth_error: "", login_hint: "" };
+  }
+  if (!available) {
     return { available: false, authenticated: false, auth_status: "cli_missing", auth_error: "", login_hint: hint };
   }
   const result = runCommand(command, args, { cwd: process.cwd(), timeoutMs: 8000 });
@@ -297,6 +302,22 @@ function providerNotice(provider: string, cli: string, evidenceState: string, hi
 }
 
 function providerCliReport(provider: string, gh: AuthState, glab: AuthState): Record<string, unknown> {
+  if (gh.auth_status === "skipped_by_policy" && glab.auth_status === "skipped_by_policy") {
+    const cli = provider === "github" ? "gh" : provider === "gitlab" ? "glab" : "";
+    return {
+      provider_cli: cli,
+      provider_cli_available: cli === "gh" ? gh.available : cli === "glab" ? glab.available : false,
+      provider_authenticated: false,
+      provider_auth_status: "skipped_by_policy",
+      provider_evidence_state: "skipped_by_policy",
+      provider_login_hint: "",
+      provider_fallback: "Provider history is disabled for this run.",
+      provider_notice_level: "info",
+      provider_user_notice: "Provider history is disabled for this run; authentication was not checked.",
+      provider_notice_markdown: "**Provider Evidence Skipped**\n\n> Provider history is disabled for this run; authentication was not checked.",
+      provider_next_steps: [],
+    };
+  }
   let state: AuthState;
   let cli: string;
   if (provider === "github") {

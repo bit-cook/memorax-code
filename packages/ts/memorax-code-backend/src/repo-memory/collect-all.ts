@@ -69,7 +69,7 @@ async function collectAll(options: EffectiveCollectOptions): Promise<CommandOutp
   const progress = new ProgressBar(options.progress, 3);
   let stderr = "";
   progress.update(0, "prepare", (line) => { stderr += line; });
-  const prepare = executePrepare([repo, ...(options.reuse ? ["--reuse"] : [])]);
+  const prepare = executePrepare([repo, ...(options.reuse ? ["--reuse"] : [])], options.historyCollect.provider);
   if (prepare.exitCode !== 0) {
     progress.fail(0, "prepare failed", (line) => { stderr += line; });
     return writeFailure("prepare", prepare, options.pretty, { repo }, stderr);
@@ -153,6 +153,7 @@ async function collectAll(options: EffectiveCollectOptions): Promise<CommandOutp
       providerFacets.degraded_to_local_only = options.historyMode !== "provider-required";
       providerFacets.reason = "provider_facets_failed";
       providerFacets.output = "";
+      // A reused bundle must not present stale raw evidence as this run's collection.
       if (existsSync(providerOutput)) unlinkSync(providerOutput);
       const notice = providerFailureNotice(provider, providerResult, options.historyMode !== "provider-required");
       if (options.historyMode === "provider-required") {

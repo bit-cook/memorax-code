@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export function scheduleMissingRepoMemoryBuild(repo, options = {}) {
   try {
@@ -11,10 +11,13 @@ export function scheduleMissingRepoMemoryBuild(repo, options = {}) {
 
     const jobHookPath = join(pluginRoot, "hooks", "repo-memory-job.mjs");
     if (!existsSync(jobHookPath)) return false;
+    // The detached hook changes cwd; preserve the caller's configured state root.
+    const env = { ...(options.env ?? process.env) };
+    if (env.MEMORAX_CODE_HOME) env.MEMORAX_CODE_HOME = resolve(env.MEMORAX_CODE_HOME);
     const child = spawn(options.nodePath ?? process.execPath, [jobHookPath, "maintain", "--repo", repoPath], {
       cwd: repoPath,
       detached: true,
-      env: options.env ?? process.env,
+      env,
       stdio: "ignore",
       windowsHide: true,
     });

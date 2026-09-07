@@ -60,7 +60,7 @@ function normalizeRuntime(options) {
 
 function maintainRepoMemory(request, runtime) {
   const repo = realpathRepo(resolve(request.repo));
-  const memoraxCodeHome = process.env.MEMORAX_CODE_HOME || join(homedir(), ".memorax-code");
+  const memoraxCodeHome = resolve(process.env.MEMORAX_CODE_HOME || join(homedir(), ".memorax-code"));
   const activeMarker = readActiveRepoMemoryJobMarker({ memoraxCodeHome, repoRealpath: repo });
   if (activeMarker.active) {
     return maintenanceDecision({
@@ -255,7 +255,8 @@ function startRepoMemoryJob(request, runtime) {
     throw new Error(`repo memory update requires an existing .repo_memory/PROFILE.md: ${repo}`);
   }
 
-  const memoraxCodeHome = process.env.MEMORAX_CODE_HOME || join(homedir(), ".memorax-code");
+  // Job paths and the child environment must retain this root after cwd changes.
+  const memoraxCodeHome = resolve(process.env.MEMORAX_CODE_HOME || join(homedir(), ".memorax-code"));
   const jobsDir = repoMemoryJobsDir(memoraxCodeHome);
 
   const activeMarker = readActiveRepoMemoryJobMarker({ memoraxCodeHome, repoRealpath: repo });
@@ -308,6 +309,8 @@ function startRepoMemoryJob(request, runtime) {
   }
 
   mkdirSync(jobsDir, { recursive: true });
+  // The startup lock serializes worker publication; the active marker prevents
+  // another launch after this short-lived lock is released.
   const lockResult = tryAcquireRepoMemoryStartupLock({ memoraxCodeHome, repoRealpath: repo });
   if (!lockResult.acquired) {
     const markerState = waitForActiveRepoMemoryJobMarker({ memoraxCodeHome, repoRealpath: repo, timeoutMs: 2000, intervalMs: 50 });
@@ -349,7 +352,10 @@ function startRepoMemoryJob(request, runtime) {
       child = spawn(workerCommand[0], workerCommand.slice(1), {
         cwd: repo,
         detached: true,
-        env: repoMemoryJobWorkerEnv({ jobId, runId }),
+        env: repoMemoryJobWorkerEnv({ jobId, runId }, {
+          ...process.env,
+          MEMORAX_CODE_HOME: memoraxCodeHome,
+        }),
         stdio: ["ignore", logFd, logFd],
       });
     } finally {
@@ -413,7 +419,7 @@ function waitForWorkerInitialization(input) {
     try {
       lastState = JSON.parse(readFileSync(input.jobPath, "utf8"));
     } catch {
-      // Atomic replacement can make the file briefly unavailable to a concurrent reader.
+      // Retry transient read failures within the same startup deadline.
     }
     if (lastState.status === "running" || lastState.status === "succeeded" || lastState.status === "failed") return;
 

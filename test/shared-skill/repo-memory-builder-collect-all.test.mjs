@@ -27,6 +27,7 @@ function createFakeProviderCli(path, command) {
     path,
     `#!/bin/sh
 set -eu
+printf '%s\\n' "$*" >> "$0.calls"
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   printf '%s\\n' 'not logged in' >&2
   exit 1
@@ -43,6 +44,7 @@ function createFakeAuthenticatedGithubCli(path) {
     path,
     `#!/bin/sh
 set -eu
+printf '%s\\n' "$*" >> "$0.calls"
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   printf '%s\\n' 'github.com logged in'
   exit 0
@@ -383,7 +385,7 @@ test("collect-all can require provider evidence instead of falling back", () => 
   }
 });
 
-test("collect-all can skip provider evidence even when provider is ready", () => {
+test("collect-all skips provider evidence without probing installed provider CLIs", () => {
   const root = mkdtempSync(join(tmpdir(), "memorax-code-repo-memory-provider-skipped."));
   try {
     const { repo, bin } = createRepoFixture(root);
@@ -391,10 +393,13 @@ test("collect-all can skip provider evidence even when provider is ready", () =>
 
     const result = runCollectAll(repo, bin, ["--skip-provider"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(existsSync(join(bin, "gh.calls")), false);
+    assert.equal(existsSync(join(bin, "glab.calls")), false);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);
     assert.equal(report.effective_settings.history.mode, "local-only");
-    assert.equal(report.provider.evidence_state, "ready");
+    assert.equal(report.provider.evidence_state, "skipped_by_policy");
+    assert.deepEqual(report.notices, []);
     assert.equal(report.steps.provider_facets.skipped, true);
     assert.equal(report.steps.provider_facets.reason, "provider_skipped_by_user");
     assert.equal("indexes" in report.counts, false);
@@ -416,6 +421,8 @@ test("collect-all supports history mode none without collecting commit or provid
 
     const result = runCollectAll(repo, bin, ["--history-mode", "none"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(existsSync(join(bin, "gh.calls")), false);
+    assert.equal(existsSync(join(bin, "glab.calls")), false);
 
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);

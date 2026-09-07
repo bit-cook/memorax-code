@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -103,6 +103,17 @@ This profile describes the test repository.
     assert.equal(report.checked.includes("custom-state.json"), false);
     assert.equal(report.checked.includes("procedure-memory/reviewing-code.md"), false);
     assert.equal(report.checked.includes("user-profile/preferences.md"), false);
+
+    for (const path of ["PROFILE.md", "resources/commits.md", "resources/prs.md", "resources/issues.md"]) {
+      const file = join(memory, path);
+      writeFileSync(file, readFileSync(file, "utf8").replaceAll("\n", "\r\n"));
+    }
+    const crlfResult = spawnSync(process.execPath, [repoMemoryScript, "validate", repo, "--pretty"], {
+      cwd: packageRoot,
+      encoding: "utf8",
+    });
+    assert.equal(crlfResult.status, 0, crlfResult.stderr || crlfResult.stdout);
+    assert.deepEqual(JSON.parse(crlfResult.stdout), report);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

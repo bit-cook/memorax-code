@@ -19,8 +19,9 @@ const inheritedJobEnv = Object.fromEntries(Object.entries(process.env).filter(([
   !/^(MEMORAX_CODE_REPO_MEMORY_|REPO_MEMORY_TEST_)/i.test(key)
 )));
 
-function runJob(args, env = {}) {
+function runJob(args, env = {}, { cwd } = {}) {
   return spawnSync(process.execPath, [jobDriver, ...args], {
+    cwd,
     encoding: "utf8",
     env: { ...inheritedJobEnv, ...env },
   });
@@ -369,6 +370,27 @@ test("repo memory job launcher writes job state in MEMORAX_CODE_HOME", (t) => {
   assert.deepEqual(state.command, [process.execPath, fixtureRunner, repo, state.finalMessagePath]);
   assert.equal(state.workerCommand[1], workerPath);
   killAndWait(payload.pid, payload.jobPath);
+});
+
+test("repo memory maintenance preserves a relative home when workers change cwd", (t) => {
+  const root = tempRoot(t, "repo-memory-job-relative-home-");
+  const repo = join(root, "repo");
+  const memoraxCodeHome = join(root, "memorax-code");
+  const envLog = join(root, "worker-env.json");
+  initRepo(repo);
+
+  const result = runJob(["maintain", "--repo", repo], {
+    MEMORAX_CODE_HOME: "./memorax-code",
+    REPO_MEMORY_TEST_ENV_LOG: envLog,
+  }, { cwd: root });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.action, "build");
+  assert.equal(payload.job.jobPath, join(repoMemoryJobsDir(memoraxCodeHome), payload.job.jobId, "job.json"));
+  assert.equal(waitForTerminal(payload.job.jobPath).status, "succeeded");
+  assert.equal(JSON.parse(readFileSync(envLog, "utf8")).memoraxCodeHome, memoraxCodeHome);
+  assert.equal(existsSync(join(repo, "memorax-code")), false);
+  waitForMarkerAbsent(memoraxCodeHome, repo);
 });
 
 test("repo memory job launcher allows only one concurrent startup per repo", async (t) => {

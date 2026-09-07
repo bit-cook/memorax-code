@@ -110,7 +110,7 @@ test("Unicode case folding preserves multilingual duplicate detection without me
   for (const [index, [stored, requested]] of pairs.entries()) {
     const prefix = `key${String(index).padStart(2, "0")} `;
     const added = run("add", repo, ["--type", "profile", "--description", prefix + stored, "--applies-when", "In this repo."]);
-    const duplicate = run("add", repo, ["--type", "communication", "--description", prefix + requested, "--applies-when", "In this repo."]);
+    const duplicate = run("add", repo, ["--type", "communication", "--description", prefix + requested, "--applies-when", " in THIS   repo. "]);
     assert.equal(duplicate.status, "duplicate", `${stored} / ${requested}`);
     assert.equal(duplicate.id, added.id);
   }
@@ -118,6 +118,14 @@ test("Unicode case folding preserves multilingual duplicate detection without me
   const dotless = run("add", repo, ["--type", "profile", "--description", "dotless ı", "--applies-when", "In this repo."]);
   assert.equal(dotless.status, "added");
   assert.notEqual(dotless.id, latin.id);
+
+  const unscoped = run("add", repo, ["--type", "profile", "--description", "Use short answers.", "--applies-when", ""]);
+  const duplicate = run("add", repo, [
+    "--type", "communication", "--description", "  USE short answers. ",
+    "--applies-when", "-", "--do-not-apply-when", "-",
+  ]);
+  assert.equal(duplicate.status, "duplicate");
+  assert.equal(duplicate.id, unscoped.id);
 });
 
 test("field normalization preserves the previous whitespace and literal BOM semantics", (t) => {
@@ -131,6 +139,52 @@ test("field normalization preserves the previous whitespace and literal BOM sema
   assert.equal(pref.description, "User prefers 中文 answers.");
   assert.equal(pref.applies_when, "\uFEFFLiteral BOM remains content.\uFEFF");
   assert.equal(pref.do_not_apply_when, "A one-time override.");
+});
+
+test("duplicate detection preserves distinct descriptions, scopes and exceptions", (t) => {
+  const original = ["Use English in comments.", "Writing public docs.", "User requests Chinese."];
+  const changes = [
+    ["Use English in comments.", "Writing commit messages.", original[2]],
+    [original[0], original[1], "Translating external documents."],
+    ["English in comments.", original[1], original[2]],
+    [original[1], original[1], original[2]],
+    [original[2], original[1], original[2]],
+  ];
+  for (const [index, changed] of changes.entries()) {
+    const repo = workspace(t, `distinct-${index}`);
+    const add = ([description, scope, exception]) => run("add", repo, [
+      "--type", "communication", "--description", description,
+      "--applies-when", scope, "--do-not-apply-when", exception,
+    ]);
+    const first = add(original);
+    const second = add(changed);
+    assert.equal(second.status, "added", JSON.stringify(changed));
+    assert.notEqual(second.id, first.id);
+    assert.equal(run("list", repo).active_count, 2);
+  }
+});
+
+test("blank descriptions are rejected before creating or rewriting storage", (t) => {
+  for (const command of ["add", "update"]) {
+    const repo = workspace(t, command);
+    const path = command === "update" ? seed(repo) : preferencesPath(repo);
+    const args = command === "add"
+      ? ["--type", "communication", "--applies-when", "In this repo."]
+      : ["--id", "pref_20260710_legacy-workflow"];
+    for (const description of ["", " \t\u0085\u001c\u3000 "]) {
+      const result = raw(command, repo, [...args, "--description", description]);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /description must not be empty/);
+      if (command === "update") {
+        assert.equal(readFileSync(path, "utf8"), legacyFixture);
+        assert.equal(readFileSync(join(repo, ".gitignore"), "utf8"), ".repo_memory/\n");
+        assert.equal(run("list", repo).active_count, 1);
+      } else {
+        assert.equal(existsSync(join(repo, ".repo_memory")), false);
+        assert.equal(existsSync(join(repo, ".gitignore")), false);
+      }
+    }
+  }
 });
 
 test("invalid UTF-8 is rejected without rewriting existing preferences", (t) => {

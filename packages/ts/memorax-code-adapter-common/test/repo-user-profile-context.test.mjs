@@ -30,6 +30,9 @@ test("tracked unignored symlinked oversized and invalid preference files fail cl
     }],
     ["oversized", async (_repo, path) => writeFile(path, "x".repeat((64 * 1024) + 1))],
     ["invalid", async (_repo, path) => writeFile(path, "# invalid preferences\n")],
+    ["blank-description", async (repo) => writePreferences(repo, [
+      preference("pref_blank", " \t", "this must not become the description", "never"),
+    ])],
   ];
 
   try {

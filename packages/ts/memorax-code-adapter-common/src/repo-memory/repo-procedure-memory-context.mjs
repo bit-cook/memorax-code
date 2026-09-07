@@ -45,6 +45,7 @@ function readTrustedProcedureFiles(repoRoot, options) {
           omitted = true;
           continue;
         }
+        // Both checks keep tracked or accidentally publishable files out of personal context.
         const trackedStatus = gitExitCode(repoRoot, ["ls-files", "--error-unmatch", "--", gitPath]);
         if (trackedStatus === 0) {
           omitted = true;

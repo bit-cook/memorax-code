@@ -40,6 +40,7 @@ function readTrustedPreferences(repoRoot, options) {
       debug(options, `Skipping untrusted repo user preferences: ${PREFERENCES_GIT_PATH}`);
       return undefined;
     }
+    // Both checks keep tracked or accidentally publishable files out of personal context.
     const trackedStatus = gitExitCode(repoRoot, ["ls-files", "--error-unmatch", "--", PREFERENCES_GIT_PATH]);
     if (trackedStatus === 0) {
       debug(options, `Skipping tracked repo user preferences: ${PREFERENCES_GIT_PATH}`);
@@ -134,7 +135,8 @@ function nonNegativeInteger(value) {
 
 function field(block, label) {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = block.match(new RegExp(`^- ${escaped}:\\s*(.*)$`, "m"));
+  // An empty value must not borrow the following field's line.
+  const match = block.match(new RegExp(`^- ${escaped}:[ \\t]*(.*)$`, "m"));
   return match?.[1]?.trim() ?? "";
 }
 

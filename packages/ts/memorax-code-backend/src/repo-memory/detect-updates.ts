@@ -150,6 +150,7 @@ async function detectUpdates(options: EffectiveDetectOptions, skillDir: string):
   }
   const fetchedPrs = providerFetch.ok === true ? currentPrs : [];
   const fetchedIssues = providerFetch.ok === true ? currentIssues : [];
+  // Unavailable evidence must not look like an empty successful provider snapshot.
   if (!currentPrs.length && providerFetch.ok !== true) currentPrs = existingPrs;
   if (!currentIssues.length && providerFetch.ok !== true) currentIssues = existingIssues;
 
@@ -333,7 +334,7 @@ function loadJson(path: string, fallback: unknown): unknown {
 
 function parseFrontmatter(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
-  const text = readFileSync(path, "utf8");
+  const text = readFileSync(path, "utf8").replaceAll("\r\n", "\n");
   if (!text.startsWith("---\n")) return {};
   const end = text.indexOf("\n---", 4);
   if (end < 0) return {};
@@ -350,6 +351,7 @@ function parseFrontmatter(path: string): Record<string, string> {
 }
 
 function bodyAfterFrontmatter(text: string): string {
+  text = text.replaceAll("\r\n", "\n");
   if (!text.startsWith("---\n")) return text;
   const end = text.indexOf("\n---", 4);
   if (end < 0) return text;
@@ -714,6 +716,7 @@ function deltaSummary(existing: JsonObject[], current: JsonObject[]): JsonObject
     updated_numbers: updated,
     upsert_numbers: [...added, ...updated].sort((a, b) => a - b),
     baseline_only_numbers: baselineOnly,
+    // A bounded provider window cannot prove that an older resource was deleted.
     delete_numbers: [],
   };
 }
