@@ -6,6 +6,39 @@ behavior.
 
 ## Unreleased
 
+## [0.1.14] - 2026-09-07
+
+### Added
+
+- Added `memorax-code update --recover` to restore and verify the installed
+  package after an interrupted package transition.
+
+### Changed
+
+- User Profile operations now use the packaged Node.js runtime instead of
+  Python, while preserving the existing preference-file format.
+
+### Fixed
+
+- Preserved native user and assistant timestamps during automatic QA
+  writeback, with explicit observed-time fallbacks when native timestamps are
+  unavailable. Buffering, chunking, and retries retain these times.
+- Preserved message whitespace across writeback chunk boundaries, including
+  whitespace-only fragments.
+- Restored CodeBuddy/WorkBuddy automatic writeback during cold starts, after
+  long tool chains, and when transcripts use Windows CRLF line endings.
+- Kept relative MemoraX Code home paths consistent across Backend startup,
+  package updates, and background Repo Memory jobs.
+- Preserved distinct User Profile preferences with different applicability or
+  exceptions, and prevented empty fields from consuming adjacent fields.
+- Skipped provider authentication probes during local-only Repo Memory
+  collection and rejected failed OpenCode assistant responses instead of
+  treating partial output as completed work.
+- Preserved newer Trae turns when an earlier Stop finishes late, and refreshed
+  managed runtime paths when recovery configuration changes.
+- Kept CLI workspace association and interrupted-turn recovery working when
+  local trace event capture is disabled.
+
 ## [0.1.13] - 2026-09-04
 
 ### Added
@@ -208,6 +241,7 @@ Later upgrades do not require this workaround.
 - Required a non-empty MemoraX user ID and API key during interactive setup,
   with clearer registration guidance.
 
+[0.1.14]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.14
 [0.1.10]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.10
 [0.1.9]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.9
 [0.1.8]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.8
