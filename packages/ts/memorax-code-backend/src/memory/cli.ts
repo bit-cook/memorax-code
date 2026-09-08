@@ -422,6 +422,11 @@ function memoryCliTraceBinding(
     return { client, expectedSessionId };
   }
 
+  // Native WorkBuddy/CodeBuddy tools carry this identity even when the client
+  // does not provide CODEBUDDY_ENV_FILE for the SessionStart export bridge.
+  const codeBuddySessionId = env.CODEBUDDY_SESSION_ID?.trim();
+  if (codeBuddySessionId) return { client: "codebuddy", expectedSessionId: codeBuddySessionId };
+
   const expectedSessionId = env.CODEX_THREAD_ID?.trim();
   return expectedSessionId
     ? { client: "codex", expectedSessionId }

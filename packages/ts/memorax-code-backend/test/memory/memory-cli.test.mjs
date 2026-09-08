@@ -972,7 +972,9 @@ test("memory CLI keeps same-ID General client bindings separate from an inherite
     const options = {
       env: {
         CODEX_THREAD_ID: sessionId,
-        ...(client === "codex" ? {} : {
+        ...(client === "codex" ? {} : client === "codebuddy" ? {
+          CODEBUDDY_SESSION_ID: sessionId,
+        } : {
           MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT: client,
           MEMORAX_CODE_MEMORY_CLI_TRACE_SESSION_ID: sessionId,
         }),

@@ -502,7 +502,9 @@ state.
 
 In an integrated client, the CLI validates the exact current-Turn context to
 reuse its workspace kind, including `projectless`, so explicit Add/Search and
-automatic writeback resolve the same General scope. Without that context,
+automatic writeback resolve the same General scope. WorkBuddy/CodeBuddy tools
+can supply native `CODEBUDDY_SESSION_ID` when the SessionStart environment-file
+bridge is unavailable. Without that context,
 standalone commands resolve their working directory. General changes the
 remote namespace for subsequent operations; it neither migrates old memory nor
 searches both the old and new namespaces.

@@ -237,8 +237,8 @@ test("CodeBuddy provisional turn writeback and nested Skill commands share Gener
       cwd: nested,
       env: {
         ...env,
-        MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT: "codebuddy",
-        MEMORAX_CODE_MEMORY_CLI_TRACE_SESSION_ID: sessionId,
+        CODEBUDDY_SESSION_ID: sessionId,
+        CODEX_THREAD_ID: "inherited-codex-thread",
       },
       fetchImpl,
     };
