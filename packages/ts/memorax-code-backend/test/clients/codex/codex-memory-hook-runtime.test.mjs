@@ -643,6 +643,52 @@ test("memory hook and nested Skill commands share General across Codex projectle
   }
 });
 
+test("Codex General recovery respects the native header and existing local bindings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-native-scope-"));
+  const workspace = join(root, "Documents", "Codex", "2026-09-08", "task");
+  const nested = join(workspace, "nested");
+  await mkdir(nested, { recursive: true });
+  const env = {
+    ...WRITEBACK_ENV,
+    HOME: root,
+    USERPROFILE: root,
+    MEMORAX_CODE_HOME: join(root, "state"),
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
+    MEMORAX_CODE_MEMORY_RETRIEVAL_ENABLED: "true",
+  };
+  const metadata = (id, cwd) => ({ type: "session_meta", payload: { id, cwd } });
+  const { fetchImpl, requests } = memoraxSearchFetch("Scoped test memory.");
+  try {
+    for (const [sessionId, records, initialKind] of [
+      ["wrong-session", [metadata("other-session", workspace)]],
+      ["imported-root", [metadata("imported-root", nested), metadata("imported-root", workspace)]],
+      ["invalid-header", [{ type: "turn_context", payload: {} }, metadata("invalid-header", workspace)]],
+      ["explicit-local", [metadata("explicit-local", workspace)], "local"],
+    ]) {
+      const transcriptPath = join(root, `${sessionId}.jsonl`);
+      await writeFile(transcriptPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+      const controller = createCodexMemoryHookRuntime({ env, fetchImpl, automaticWriteback: () => ({ accepted: true }) });
+      try {
+        if (initialKind) {
+          await controller.recordTurnStart({
+            sessionId, turnId: "first", prompt: "Keep the explicit folder scope.",
+            cwd: workspace, workspaceKind: initialKind, transcriptPath,
+          });
+        }
+        const result = await controller.recordTurnStart({
+          sessionId, turnId: "next", prompt: "Use only the authorized session scope.", cwd: nested, transcriptPath,
+        });
+        assert.match(result.additionalContext, /Scoped test memory/, sessionId);
+        assert.equal(requests.at(-1).body.user_id, `user-1@${initialKind ? "task" : "nested"}`, sessionId);
+      } finally {
+        controller.close();
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("memory hook restores exact projectless scope from current-turn state after restart with trace disabled", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-projectless-restart-"));
   const memoraxCodeHome = join(root, "home");

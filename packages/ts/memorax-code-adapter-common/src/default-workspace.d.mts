@@ -12,3 +12,17 @@ export function resolveWorkBuddyWorkspaceKind(
 ): string | undefined;
 
 export function isOpenCodeDefaultWorkspace(cwd: string | undefined, options?: DefaultWorkspaceOptions): boolean;
+
+export type CodexWorkspaceOptions = Readonly<{
+  env?: NodeJS.ProcessEnv;
+  path?: typeof import("node:path").posix;
+  managedRoots?: readonly string[];
+  canonicalize?: (path: string) => string | undefined;
+}>;
+
+export function resolveCodexWorkspaceKind(
+  input: { cwd?: unknown; workspace_kind?: unknown; workspaceKind?: unknown },
+  options?: CodexWorkspaceOptions,
+): string | undefined;
+
+export function isCodexManagedTaskWorkspace(value: string | undefined, options?: CodexWorkspaceOptions): boolean;

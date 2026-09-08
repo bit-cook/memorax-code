@@ -22,6 +22,7 @@ import {
   resolvedRepoMemoryWorktree,
   type ConfiguredRepositoryMemoryResult,
   type RepositoryMemorySessionRuntime,
+  type RepositoryMemorySessionRequest,
 } from "./repository-session.js";
 import {
   createMemoryTurnCoordinator,
@@ -128,13 +129,14 @@ export function createHarnessMemoryRuntime(
   const retrievalTurns = new Set<string>();
   const retrievalTurnLimit = positiveInteger(options.maxEntries, 256);
 
-  function resolveRepositoryMemory(input: { sessionId: string; cwd?: string; workspaceKind?: string; requireBoundScope?: boolean }) {
+  function resolveRepositoryMemory(input: { sessionId: string; cwd?: string; workspaceKind?: string; requireBoundScope?: boolean; restoreScope?: RepositoryMemorySessionRequest["restoreScope"] }) {
     return repositoryMemorySession.resolve({
       client: definition.client,
       sessionId: input.sessionId,
       workspaceRoot: input.cwd,
       workspaceKind: input.workspaceKind,
       requireBoundScope: input.requireBoundScope,
+      restoreScope: input.restoreScope,
       memoraxCodeHome: options.memoraxCodeHome ?? options.env?.MEMORAX_CODE_HOME,
       env: options.env,
     });

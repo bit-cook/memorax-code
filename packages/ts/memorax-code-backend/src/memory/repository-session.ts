@@ -46,6 +46,8 @@ export type RepositoryMemorySessionRequest = {
   workspaceRoot?: string;
   workspaceKind?: string;
   requireBoundScope?: boolean;
+  // Native callers validate the candidate's identity; only unbound sessions use it.
+  restoreScope?: () => Promise<RepositoryMemoryScope | undefined>;
   memoraxCodeHome?: string;
   env?: Record<string, string | undefined>;
 };
@@ -147,23 +149,28 @@ export async function resolveConfiguredRepositoryMemoryForSession(
         error: "memory scope authority is unavailable for this session",
       };
     }
+    // Native recovery is only a candidate for an unbound session. Resolve it
+    // inside the session queue so it cannot override a concurrent live binding.
+    const restoredScope = !cachedScope ? await input.restoreScope?.() : undefined;
+    const boundScope = cachedScope
+      ?? (restoredScope?.baseUserId === configResult.config.userId ? restoredScope : undefined);
     const workspaceKind = input.workspaceKind?.trim().toLowerCase();
     let workspaceRoot = input.workspaceRoot?.trim() ? input.workspaceRoot : undefined;
     // Preserve the folder namespace when hooks run from nested directories.
     // Reuse the bound root only after ruling out another workspace or repository.
     if (
-      cachedScope
+      boundScope
       && (
-        (repositoryMemoryScopeKind(cachedScope) === "local-directory" && workspaceKind !== "projectless")
-        || (repositoryMemoryScopeKind(cachedScope) === "general" && (!workspaceKind || workspaceKind === "projectless"))
+        (repositoryMemoryScopeKind(boundScope) === "local-directory" && workspaceKind !== "projectless")
+        || (repositoryMemoryScopeKind(boundScope) === "general" && (!workspaceKind || workspaceKind === "projectless"))
       )
-      && await repositoryMemoryScopeContainsWorkspace(cachedScope, workspaceRoot)
+      && await repositoryMemoryScopeContainsWorkspace(boundScope, workspaceRoot)
     ) {
-      workspaceRoot = cachedScope.boundWorkspaceRoot;
+      workspaceRoot = boundScope.boundWorkspaceRoot;
     }
-    if (!workspaceRoot && cachedScope?.boundWorkspaceRoot) workspaceRoot = cachedScope.boundWorkspaceRoot;
+    if (!workspaceRoot && boundScope?.boundWorkspaceRoot) workspaceRoot = boundScope.boundWorkspaceRoot;
     const effectiveWorkspaceKind = input.workspaceKind
-      ?? (cachedScope && repositoryMemoryScopeKind(cachedScope) === "general"
+      ?? (boundScope && repositoryMemoryScopeKind(boundScope) === "general"
         ? "projectless"
         : undefined);
     if (!workspaceRoot && effectiveWorkspaceKind?.trim().toLowerCase() !== "projectless") {
@@ -180,6 +187,9 @@ export async function resolveConfiguredRepositoryMemoryForSession(
       baseUserId: configResult.config.userId,
     });
     if (!scopeResult.ok) return scopeResult;
+    if (!cachedScope && boundScope && !repositoryMemoryScopesMatch(boundScope, scopeResult.scope)) {
+      return repositoryScopeMismatch();
+    }
     if (cached?.scope.baseUserId === configResult.config.userId) {
       if (!repositoryMemoryScopesMatch(cached.scope, scopeResult.scope)) {
         if (repositoryMemoryScopeCanUpgradeFromDegradedGit(cached.scope, scopeResult.scope)) {

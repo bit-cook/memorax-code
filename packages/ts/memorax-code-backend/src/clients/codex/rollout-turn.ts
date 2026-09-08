@@ -1,7 +1,37 @@
 import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { parseNativeMessageTimestamp } from "../../shared/message-time.js";
 
 type JsonRecord = Record<string, unknown>;
+
+export async function readCodexRolloutSessionWorkspace(input: {
+  transcriptPath: string;
+  sessionId: string;
+}): Promise<string | undefined> {
+  // Only the first nonblank record owns the session's initial cwd. Stop there:
+  // later metadata may belong to imported history, and rollouts can be large.
+  try {
+    let pending = "";
+    for await (const chunk of createReadStream(input.transcriptPath, { encoding: "utf8" })) {
+      pending += chunk;
+      let newline: number;
+      while ((newline = pending.indexOf("\n")) !== -1) {
+        const line = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        if (line.trim()) return sessionWorkspaceFromHeader(line, input.sessionId);
+      }
+    }
+    return sessionWorkspaceFromHeader(pending, input.sessionId);
+  } catch {
+    return undefined;
+  }
+}
+
+function sessionWorkspaceFromHeader(line: string, sessionId: string): string | undefined {
+  const record: unknown = JSON.parse(line);
+  if (!isRecord(record) || record.type !== "session_meta" || !isRecord(record.payload)) return undefined;
+  return nonBlankString(record.payload.id) === sessionId ? nonBlankString(record.payload.cwd) : undefined;
+}
 
 export type CodexTurnTokenUsage = {
   input_tokens: number;

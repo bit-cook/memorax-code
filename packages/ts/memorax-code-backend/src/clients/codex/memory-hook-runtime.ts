@@ -1,6 +1,7 @@
 import {
   readCodexInterruptedRolloutTurn,
   readCodexRolloutTurn,
+  readCodexRolloutSessionWorkspace,
   type CodexRolloutTurn,
   type CodexRolloutTurnFailureReason,
 } from "./rollout-turn.js";
@@ -12,6 +13,7 @@ import {
 } from "../../memory/harness-runtime.js";
 import { readCodexSessionTurnIndex } from "./session-turn-index.js";
 import { resolveCodexWorkspaceRoot } from "./workspace-links.js";
+import { isCodexManagedTaskWorkspace } from "../../../../memorax-code-adapter-common/src/default-workspace.mjs";
 import type {
   MemoryHookTurnStartResult,
   CodexTurnStartCommand,
@@ -22,7 +24,8 @@ import type {
   MemoryTurnCoordinator,
   MemoryTurnState,
 } from "../../memory/turn-coordinator.js";
-import type { ConfiguredRepositoryMemoryResult } from "../../memory/repository-session.js";
+import { resolveConfiguredRepositoryMemory, type ConfiguredRepositoryMemoryResult } from "../../memory/repository-session.js";
+import { repositoryMemoryScopeContainsWorkspace } from "../../repository/scope.js";
 import type {
   RepositoryMemoryScope,
   RepositoryMemoryScopeFailureReason,
@@ -268,7 +271,7 @@ async function resolveSessionTurnIndex(input: {
 }
 
 async function resolveHookRepositoryMemory(
-  entry: Pick<CodexMemoryHookTurnStart, "sessionId" | "cwd" | "workspaceKind">,
+  entry: Pick<CodexMemoryHookTurnStart, "sessionId" | "cwd" | "workspaceKind"> & { transcriptPath?: string },
   options: CodexMemoryHookRuntimeOptions,
   memory: HarnessMemoryRuntime,
   requireBoundScope = false,
@@ -285,6 +288,29 @@ async function resolveHookRepositoryMemory(
     cwd: registeredWorkspace ?? entry.cwd,
     workspaceKind: entry.workspaceKind,
     requireBoundScope,
+    restoreScope: async () => {
+      if (!entry.transcriptPath || (entry.workspaceKind && entry.workspaceKind.trim().toLowerCase() !== "projectless")) return undefined;
+      const initialCwd = await readCodexRolloutSessionWorkspace({
+        transcriptPath: entry.transcriptPath,
+        sessionId: entry.sessionId,
+      });
+      if (!isCodexManagedTaskWorkspace(initialCwd, { env: options.env })) return undefined;
+      const initial = await resolveConfiguredRepositoryMemory({
+        workspaceRoot: initialCwd,
+        workspaceKind: "projectless",
+        memoraxCodeHome,
+        env: options.env,
+      });
+      if (!initial.ok || initial.memory.scope?.scopeKind !== "general") return undefined;
+      const workspaces = [registeredWorkspace, entry.cwd].filter((cwd): cwd is string => Boolean(cwd));
+      if (workspaces.length === 0) return undefined;
+      // Validate both current sources before offering the original root. A
+      // nested Git repository or an escaping path must keep its own authority.
+      for (const cwd of workspaces) {
+        if (!await repositoryMemoryScopeContainsWorkspace(initial.memory.scope, cwd)) return undefined;
+      }
+      return initial.memory.scope;
+    },
   });
   if (!primary.ok || !registeredWorkspace || !entry.cwd) return primary;
   // Validate both sources against the session binding; preferring the registry

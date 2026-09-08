@@ -417,6 +417,12 @@ Important distinctions:
   General sharing does not merge client/session identity or physical workspace
   keys. The [directory rules](docs/configuration.md#memory-scope) apply to Codex,
   WorkBuddy, and OpenCode; ordinary workspaces retain their existing rules.
+  Codex can recover an unbound session's General root from the matching
+  rollout's first `session_meta` record when a new Turn resumes in a child
+  directory. The native initial cwd must match the shared Codex default-directory
+  recognizer, and both Hook and registered cwd must remain inside that root
+  without intervening Git authority. Recovery runs within session serialization,
+  never replaces a live binding, and does not depend on retained trace records.
 - A malformed or incomplete direct `.git` directory is the sole documented
   folder-scope fallback. That degraded scope may upgrade in-session only to a
   verified Git scope with the same Base User ID and canonical workspace root;
