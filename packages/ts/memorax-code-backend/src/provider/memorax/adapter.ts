@@ -427,7 +427,7 @@ function buildMemoraxAddPayload(
 
 function memoraxScopeVersion(scopeKind: ReturnType<typeof repositoryMemoryScopeKind>): string {
   if (scopeKind === "git-repository") return "repository-name.v1";
-  if (scopeKind === "codex-projectless") return "codex-projectless.v1";
+  if (scopeKind === "general") return "general.v1";
   return "workspace-name.v1";
 }
 

@@ -186,7 +186,14 @@ export function createHarnessMemoryRuntime(
         sessionTurnIndex: turn.sessionTurnIndex,
         request: traceRequest ?? { prompt, cwd: turn.cwd, transcriptPath: turn.transcriptPath },
       }));
-      await recordTraceBestEffort("current_turn_write", writeCurrentTraceTurn(turn.traceContext, {
+      const scope = repositoryMemory.ok ? repositoryMemory.memory.scope : undefined;
+      // Later hooks may omit the default-chat hint or run in a child directory.
+      // Keep the validated General binding in the operational CLI bridge while
+      // the event above retains the original native cwd and workspace kind.
+      const currentTurnContext = turn.traceContext && scope?.scopeKind === "general"
+        ? { ...turn.traceContext, cwd: scope.boundWorkspaceRoot, workspaceKind: "projectless" }
+        : turn.traceContext;
+      await recordTraceBestEffort("current_turn_write", writeCurrentTraceTurn(currentTurnContext, {
         memoraxCodeHome: options.memoraxCodeHome,
         env: options.env,
         now: () => new Date(now()),

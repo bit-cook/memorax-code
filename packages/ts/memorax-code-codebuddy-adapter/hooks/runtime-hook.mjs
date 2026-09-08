@@ -19,6 +19,7 @@ const { buildRepoProcedureMemoryContext } = await import(pathToFileURL(join(comm
 const { buildRepoUserProfilePreferencesContext } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-user-profile-context.mjs")).href);
 const { resolveBackendConnection } = await import(pathToFileURL(join(commonRoot, "backend-connection.mjs")).href);
 const { postBackendCommand } = await import(pathToFileURL(join(commonRoot, "backend-command.mjs")).href);
+const { resolveWorkBuddyWorkspaceKind } = await import(pathToFileURL(join(commonRoot, "default-workspace.mjs")).href);
 const { ensureBackendAvailable, stringValue: commonStringValue } = await import(pathToFileURL(join(commonRoot, "hooks", "ensure-backend-runner.mjs")).href);
 const {
   evaluateMemorySkillReminder,
@@ -105,7 +106,7 @@ if (event === "SessionStart") {
   if (!prompt) process.exit(0);
   const boundary = await fileBoundary(transcriptPath);
   const turnId = provisionalTurnId(sessionId, boundary, prompt);
-  const workspaceKind = stringValue(input.workspace_kind) ?? stringValue(input.workspaceKind);
+  const workspaceKind = resolveWorkBuddyWorkspaceKind(input);
   await updatePending(pendingPath, (state) => {
     const now = Date.now();
     const existing = state[sessionId];

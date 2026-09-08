@@ -43,7 +43,7 @@ type MemoryCliResult = {
   userId?: string;
   baseUserId?: string;
   workspace?: string;
-  scopeKind?: "git-repository" | "local-directory" | "codex-projectless";
+  scopeKind?: "git-repository" | "local-directory" | "general";
   effectiveUserId?: string;
   workspaceScope?: "bound" | "unavailable";
   workspaceScopeReason?: string;
@@ -290,9 +290,9 @@ async function resolveMemoryCliRepositoryMemory(options: MemoryCliOptions): Prom
     const turnScope = turnMemory.memory.scope;
     const turnScopeKind = repositoryMemoryScopeKind(turnScope);
     if (
-      (turnScopeKind === "codex-projectless" && !turnScope.boundWorkspaceRoot)
+      (turnScopeKind === "general" && !turnScope.boundWorkspaceRoot)
       || (
-        (turnScopeKind === "codex-projectless" || turnScopeKind === "local-directory")
+        (turnScopeKind === "general" || turnScopeKind === "local-directory")
         && await repositoryMemoryScopeContainsWorkspace(turnScope, commandWorkspace)
       )
     ) {

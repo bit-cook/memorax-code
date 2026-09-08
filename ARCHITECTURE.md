@@ -410,6 +410,13 @@ Important distinctions:
   client's exact writeback source and owning tests.
 - Required client/session/turn identity and repository scope fail closed when
   incomplete, conflicting, or unprovable.
+- Adapters identify supported default chat directories as `projectless`;
+  `repository/scope.ts` resolves them to `scopeKind: general` and the shared
+  remote identity `<base-user-id>@General`. Verified Git identity takes
+  precedence. Recognition is client-owned; scope derivation stays shared.
+  General sharing does not merge client/session identity or physical workspace
+  keys. The [directory rules](docs/configuration.md#memory-scope) apply to Codex,
+  WorkBuddy, and OpenCode; ordinary workspaces retain their existing rules.
 - A malformed or incomplete direct `.git` directory is the sole documented
   folder-scope fallback. That degraded scope may upgrade in-session only to a
   verified Git scope with the same Base User ID and canonical workspace root;
@@ -492,6 +499,13 @@ local-trace components. Manual Add additionally validates user-supplied
 `--reason` metadata. The direct entrypoint is not permission to fall back to
 unscoped provider calls or to reconstruct identity from unrelated process
 state.
+
+In an integrated client, the CLI validates the exact current-Turn context to
+reuse its workspace kind, including `projectless`, so explicit Add/Search and
+automatic writeback resolve the same General scope. Without that context,
+standalone commands resolve their working directory. General changes the
+remote namespace for subsequent operations; it neither migrates old memory nor
+searches both the old and new namespaces.
 
 After a degraded direct `.git` directory is repaired, each CLI operation
 resolves the verified Git scope immediately; no client-session restart is

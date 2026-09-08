@@ -153,15 +153,17 @@ export async function resolveConfiguredRepositoryMemoryForSession(
     // Reuse the bound root only after ruling out another workspace or repository.
     if (
       cachedScope
-      && repositoryMemoryScopeKind(cachedScope) === "local-directory"
-      && workspaceKind !== "projectless"
+      && (
+        (repositoryMemoryScopeKind(cachedScope) === "local-directory" && workspaceKind !== "projectless")
+        || (repositoryMemoryScopeKind(cachedScope) === "general" && (!workspaceKind || workspaceKind === "projectless"))
+      )
       && await repositoryMemoryScopeContainsWorkspace(cachedScope, workspaceRoot)
     ) {
       workspaceRoot = cachedScope.boundWorkspaceRoot;
     }
     if (!workspaceRoot && cachedScope?.boundWorkspaceRoot) workspaceRoot = cachedScope.boundWorkspaceRoot;
     const effectiveWorkspaceKind = input.workspaceKind
-      ?? (cachedScope && repositoryMemoryScopeKind(cachedScope) === "codex-projectless"
+      ?? (cachedScope && repositoryMemoryScopeKind(cachedScope) === "general"
         ? "projectless"
         : undefined);
     if (!workspaceRoot && effectiveWorkspaceKind?.trim().toLowerCase() !== "projectless") {

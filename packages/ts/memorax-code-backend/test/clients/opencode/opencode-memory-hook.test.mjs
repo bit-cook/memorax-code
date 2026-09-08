@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runMemoryCli } from "../../../dist/memory/cli.js";
 import { createOpenCodeMemoryHookRuntime } from "../../../dist/clients/opencode/memory-hook-runtime.js";
 import { openCodeMessageTurn } from "../../../dist/clients/opencode/message-turn.js";
 import { openCodeTracePaths } from "../../../dist/trace/config.js";
@@ -332,6 +333,82 @@ test("OpenCode runtime routes SDK content and carries write quota to the next pr
   } finally {
     runtime.close();
     await rm(memoraxCodeHome, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode default chat shares General across automatic Add and nested Skill commands", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-opencode-general-"));
+  const workspace = join(root, "Documents", "Default Project");
+  const nested = join(workspace, "work");
+  await mkdir(nested, { recursive: true });
+  const env = {
+    MEMORAX_CODE_HOME: join(root, "home"),
+    MEMORAX_CODE_OPENCODE_TRACE_ENABLED: "false",
+    MEMORAX_CODE_MEMORY_RETRIEVAL_ENABLED: "false",
+    MEMORAX_CODE_MEMORY_WRITEBACK_ENABLED: "true",
+    MEMORAX_CODE_MEMORY_WRITEBACK_BUFFER_ENABLED: "false",
+    MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
+    MEMORAX_CODE_MEMORAX_API_KEY: "secret",
+    MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
+  };
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), body: JSON.parse(init.body) });
+    const data = String(url).endsWith("/add") ? { task_id: "general-add", status: "queued" } : { data: [] };
+    return new Response(JSON.stringify({ success: true, data }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const runtime = createOpenCodeMemoryHookRuntime({ env, fetchImpl });
+  const command = {
+    version: 1,
+    client: "opencode",
+    sessionId: "session-1",
+    userMessageId: "user-1",
+    cwd: workspace,
+    workspaceKind: "projectless",
+  };
+  try {
+    assert.deepEqual(await runtime.recordTurnStart({ ...command, prompt: "OpenCode user prompt." }), { ok: true });
+    assert.deepEqual(await runtime.writeback({
+      ...command,
+      assistantMessageId: "assistant-1",
+      messages: openCodeMessages(),
+    }), { ok: true, scheduled: true });
+    await waitFor(() => requests.length === 1);
+    assert.deepEqual(requests[0].body.messages.map(({ role, content }) => ({ role, content })), [
+      { role: "user", content: "OpenCode user prompt." },
+      { role: "assistant", content: "OpenCode assistant reply." },
+    ]);
+    const options = {
+      cwd: nested,
+      env: {
+        ...env,
+        MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT: "opencode",
+        MEMORAX_CODE_MEMORY_CLI_TRACE_SESSION_ID: "session-1",
+      },
+      fetchImpl,
+    };
+    const search = await runMemoryCli(["search", "--query", "general preference"], options);
+    const added = await runMemoryCli([
+      "add", "--memory", "Keep shared general preferences.", "--type", "preference", "--reason", "Explicit test save.",
+    ], options);
+    assert.equal(search.ok, true);
+    assert.equal(added.ok, true);
+    assert.equal(search.effectiveUserId, "user-1@General");
+    assert.equal(added.effectiveUserId, "user-1@General");
+    assert.deepEqual(requests.map(({ url }) => new URL(url).pathname), [
+      "/v1/memories/add", "/v1/memories/search", "/v1/memories/add",
+    ]);
+    assert.ok(requests.every(({ body }) => body.user_id === "user-1@General"));
+    for (const index of [0, 2]) {
+      assert.equal(requests[index].body.metadata.memorax_code_memory_scope, "general.v1");
+      assert.equal(requests[index].body.metadata.memorax_code_workspace, "General");
+    }
+  } finally {
+    runtime.close();
+    await rm(root, { recursive: true, force: true });
   }
 });
 

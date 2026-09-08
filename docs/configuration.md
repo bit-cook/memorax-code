@@ -356,9 +356,38 @@ state. The returned quota limit is used only to decide whether to include
 conditional anonymous-account guidance.
 
 `startup_timeout_ms` controls synchronous automatic retrieval and is capped at
-10 seconds. `user_id` is the configured username; MemoraX Code derives a
-repository-scoped identity for Git workspaces and a folder-scoped identity for
-non-Git workspaces. It never falls back to the unscoped base identity.
+10 seconds.
+
+### Memory scope
+
+`user_id` is the configured base username. MemoraX Code sends
+`<base-user-id>@<repository-or-folder-name>` for ordinary Git and non-Git
+workspaces. Recognized default chat directories instead share
+`<base-user-id>@General`, with `scopeKind: general`:
+
+| Client | Recognized default chat directory |
+| --- | --- |
+| Codex | Its canonical dated-task location, previously named `Codex-General` in MemoraX. |
+| WorkBuddy | A valid `YYYY-MM-DD-HH-mm-ss` direct child of `~/WorkBuddy`, or of WorkBuddy's configured `defaultWorkspacePath`. |
+| OpenCode | The exact `Default Project` directory under the system Documents directory, including supported Documents redirection. |
+
+A verified Git repository takes precedence over default-directory detection.
+Other selected directories retain the ordinary repository or folder rules;
+a directory name alone does not mark it as a default chat. Recognition follows
+the directory convention, so a WorkBuddy default directory later kept as a
+workspace still uses `General` if its path is unchanged and it remains non-Git.
+Claude Code, DSH, and Trae retain their existing scope rules. Claude Cowork is
+not included in this integration.
+
+Automatic writeback and Skill Add/Search use the same resolved scope. The CLI
+uses the matching current-Turn context when invoked by an integrated client;
+standalone CLI commands resolve their working directory. Local client/session
+identity and physical workspace identity remain separate even when remote
+memory is shared. Resolution never falls back to the bare base user ID.
+
+The change applies to subsequent writes and queries. Existing memories under
+`Codex-General`, WorkBuddy date-directory names, or OpenCode's `Default-Project`
+name are not migrated, and Search does not also query those previous names.
 
 ## Retrieval
 

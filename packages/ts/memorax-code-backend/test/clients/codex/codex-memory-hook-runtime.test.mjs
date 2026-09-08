@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runMemoryCli } from "../../../dist/memory/cli.js";
 import { createCodexMemoryHookRuntime } from "../../../dist/clients/codex/memory-hook-runtime.js";
 import { tracePaths } from "../../../dist/trace/config.js";
 import {
@@ -550,7 +551,7 @@ test("memory hook upgrades automatic writeback after direct Git metadata is repa
   }
 });
 
-test("memory hook maps different Codex projectless task directories to Codex-General", async () => {
+test("memory hook and nested Skill commands share General across Codex projectless task directories", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-projectless-"));
   const firstTask = join(root, "2026-07-13", "w");
   const secondTask = join(root, "2026-07-14", "new-chat-2");
@@ -566,8 +567,21 @@ test("memory hook maps different Codex projectless task directories to Codex-Gen
     prompt: "Recall it in another projectless task.",
     reply: "Used the same general scope.",
   }]);
-  const { fetchImpl, requests } = memoraxAddFetch();
-  const controller = createCodexMemoryHookRuntime({ env: WRITEBACK_ENV, fetchImpl });
+  const env = {
+    ...WRITEBACK_ENV,
+    MEMORAX_CODE_HOME: join(root, "home"),
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
+  };
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), body: JSON.parse(init.body) });
+    const data = String(url).endsWith("/add") ? { task_id: "general-add", status: "queued" } : { data: [] };
+    return new Response(JSON.stringify({ success: true, data }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const controller = createCodexMemoryHookRuntime({ env, fetchImpl });
   try {
     await controller.recordTurnStart({
       sessionId: "session-projectless-1",
@@ -602,11 +616,27 @@ test("memory hook maps different Codex projectless task directories to Codex-Gen
     }), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 2, "projectless hook writebacks did not call MemoraX add");
     assert.deepEqual(requests.map((request) => request.body.user_id), [
-      "user-1@Codex-General",
-      "user-1@Codex-General",
+      "user-1@General",
+      "user-1@General",
     ]);
-    assert.equal(requests[0].body.metadata.memorax_code_memory_scope, "codex-projectless.v1");
-    assert.equal(requests[0].body.metadata.memorax_code_workspace, "Codex-General");
+    assert.equal(requests[0].body.metadata.memorax_code_memory_scope, "general.v1");
+    assert.equal(requests[0].body.metadata.memorax_code_workspace, "General");
+    const nested = join(firstTask, "work");
+    await mkdir(nested);
+    const options = { cwd: nested, env: { ...env, CODEX_THREAD_ID: "session-projectless-1" }, fetchImpl };
+    const search = await runMemoryCli(["search", "--query", "general preference"], options);
+    const added = await runMemoryCli([
+      "add", "--memory", "Keep shared general preferences.", "--type", "preference", "--reason", "Explicit test save.",
+    ], options);
+    assert.equal(search.ok, true);
+    assert.equal(added.ok, true);
+    assert.equal(search.effectiveUserId, requests[0].body.user_id);
+    assert.equal(added.effectiveUserId, requests[0].body.user_id);
+    assert.deepEqual(requests.map(({ url }) => new URL(url).pathname), [
+      "/v1/memories/add", "/v1/memories/add", "/v1/memories/search", "/v1/memories/add",
+    ]);
+    assert.ok(requests.every(({ body }) => body.user_id === "user-1@General"));
+    assert.equal(requests[3].body.metadata.memorax_code_memory_scope, "general.v1");
   } finally {
     controller.close();
     await rm(root, { recursive: true, force: true });
@@ -650,7 +680,7 @@ test("memory hook restores exact projectless scope from current-turn state after
       transcriptPath,
     }), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 1, "restarted Hook did not restore projectless scope");
-    assert.equal(requests[0].body.user_id, "user-1@Codex-General");
+    assert.equal(requests[0].body.user_id, "user-1@General");
     const current = JSON.parse(await readFile(
       tracePaths(memoraxCodeHome).sessionCurrentTurnPath("session-projectless-restart"), "utf8",
     ));
@@ -880,7 +910,7 @@ test("memory hook writeback preserves projectless scope after turn metadata cach
       "Persisted prompt outlives metadata.",
       "Persisted reply outlives metadata.",
     ]);
-    assert.equal(requests[0].body.user_id, "user-1@Codex-General");
+    assert.equal(requests[0].body.user_id, "user-1@General");
   } finally {
     controller.close();
     await rm(root, { recursive: true, force: true });

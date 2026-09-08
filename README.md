@@ -256,6 +256,11 @@ metadata-only capture or disable a client's trace.
 Minimal local session state remains when trace is disabled so memory operations
 keep the correct workspace scope.
 
+Coding Memory follows the repository or workspace. Recognized default chat
+directories in Codex, WorkBuddy, and OpenCode share `General` under the same
+configured MemoraX user ID. Existing memories are not migrated; see
+[memory scope](docs/configuration.md#memory-scope) for the directory rules.
+
 Guest quota reminders may display the complete Mark ID. Treat reminder text
 and retained traces containing it as sensitive.
 

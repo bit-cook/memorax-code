@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { postBackendCommand } from "../../memorax-code-adapter-common/src/backend-command.mjs";
 import { resolveBackendConnection } from "../../memorax-code-adapter-common/src/backend-connection.mjs";
 import { readAdapterState } from "../../memorax-code-adapter-common/src/config-utils.mjs";
+import { isOpenCodeDefaultWorkspace } from "../../memorax-code-adapter-common/src/default-workspace.mjs";
 import { ensureBackendAvailable } from "../../memorax-code-adapter-common/src/hooks/ensure-backend-runner.mjs";
 import { recordWorkspaceEvidence } from "../../memorax-code-adapter-common/src/hooks/capture-cwd-hook.mjs";
 import {
@@ -33,7 +34,8 @@ class BackendHttpResponseError extends Error {
 export function createMemoraxOpenCodePlugin(options = {}) {
   return async ({ client, project, directory, worktree, serverUrl }) => {
     const workspaceRoot = project?.vcs === "git" ? worktree : directory;
-    const workspaceKind = project?.vcs === "git" ? "project" : "local";
+    const workspaceKind = project?.vcs === "git" ? "project"
+      : isOpenCodeDefaultWorkspace(workspaceRoot, options.workspaceOptions) ? "projectless" : "local";
     const openCodeServerUrl = urlString(serverUrl);
     const pendingTurns = new Map();
     const sessionFlushes = new Map();
