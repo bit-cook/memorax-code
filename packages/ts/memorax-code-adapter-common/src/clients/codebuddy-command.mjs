@@ -9,27 +9,74 @@ const WINDOWS_SEGMENTS = [
   ["resources", "app.asar.unpacked", "cli", "bin", "codebuddy.exe"],
 ];
 
-/**
- * Resolve the CodeBuddy executable from the environment, installed adapter
- * metadata, or the WorkBuddy/CodeBuddy application bundle.  Hooks are often
- * launched by a GUI process and therefore cannot rely on the user's shell
- * PATH or on npm's environment setup.
- */
+export function defaultCodeBuddyHome(env = process.env, homeDir = homedir(), platform = process.platform) {
+  return stringValue(env.CODEBUDDY_HOME)
+    ?? stringValue(env.CODEBUDDY_CONFIG_DIR)
+    ?? (platform === "win32" ? win32.join : join)(homeDir, ".codebuddy");
+}
+
+export function defaultWorkBuddyHome(env = process.env, homeDir = homedir(), platform = process.platform) {
+  const configured = stringValue(env.WORKBUDDY_HOME);
+  if (configured) return configured;
+  const pathJoin = platform === "win32" ? win32.join : join;
+  const legacyHome = pathJoin(homeDir, ".codebuddy");
+  const legacyMetadata = readCodeBuddyPackageMetadata(pathJoin(legacyHome, "plugins", "marketplaces", "memorax-code-local", "plugins", "memorax-code-codebuddy-adapter"));
+  // Only owned installation metadata can identify the historical Windows home.
+  if (platform === "win32" && codeBuddyMetadataClient(legacyMetadata) === "workbuddy"
+    && (!legacyMetadata.codeBuddyHome || legacyMetadata.codeBuddyHome.replaceAll("\\", "/").toLowerCase() === legacyHome.replaceAll("\\", "/").toLowerCase())) return legacyHome;
+  return pathJoin(homeDir, ".workbuddy");
+}
+
+export function codeBuddyMetadataClient(metadata) {
+  if (metadata?.client === "codebuddy" || metadata?.client === "workbuddy") return metadata.client;
+  if (metadata?.client !== undefined) return undefined;
+  return isWorkBuddyBundledCommand(metadata?.codeBuddyCommand) ? "workbuddy"
+    : stringValue(metadata?.codeBuddyCommand) ? "codebuddy" : undefined;
+}
+
+export function isWorkBuddyBundledCommand(command) {
+  return typeof command === "string"
+    && /(?:\/(?:WorkBuddy|CodeBuddy)\.app\/Contents\/Resources\/|\/(?:WorkBuddy|CodeBuddy)\/resources\/)app\.asar\.unpacked\/cli\/bin\/codebuddy(?:\.exe)?$/i.test(command.replaceAll("\\", "/"));
+}
+
+export function readCodeBuddyPackageMetadata(pluginRoot) {
+  if (!pluginRoot) return undefined;
+  try {
+    const metadata = JSON.parse(readFileSync(join(pluginRoot, ".memorax-code-package.json"), "utf8"));
+    return metadata?.version === 1 ? metadata : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolve only the selected client's executable; GUI workers cannot assume a shell PATH. */
 export function resolveHookCodeBuddyCommand({
+  client,
   env = process.env,
   pluginRoot,
   homeDir = homedir(),
   platform = process.platform,
   pathExists = commandPathExists,
 } = {}) {
-  const configured = stringValue(env.MEMORAX_CODE_CODEBUDDY_COMMAND)
-    ?? stringValue(env.CODEBUDDY_CLI_PATH)
-    ?? stringValue(env.WORKBUDDY_CODEBUDDY_PATH);
+  const metadata = readCodeBuddyPackageMetadata(stringValue(pluginRoot) ?? stringValue(env.CODEBUDDY_PLUGIN_ROOT));
+  const selectedClient = client ?? codeBuddyMetadataClient(metadata) ?? "codebuddy";
+  if (selectedClient !== "codebuddy" && selectedClient !== "workbuddy") throw new Error("invalid CodeBuddy adapter client");
+  const metadataClient = codeBuddyMetadataClient(metadata);
+  // Installed workers retain their selected command even when the ambient
+  // shell or application exports another client's command overrides.
+  const metadataCommand = metadataClient === selectedClient ? stringValue(metadata?.codeBuddyCommand) : undefined;
+  if (metadataCommand) return metadataCommand;
+  const configured = selectedClient === "workbuddy"
+    ? stringValue(env.MEMORAX_CODE_WORKBUDDY_COMMAND) ?? stringValue(env.WORKBUDDY_CODEBUDDY_PATH)
+    : stringValue(env.MEMORAX_CODE_CODEBUDDY_COMMAND) ?? stringValue(env.CODEBUDDY_CLI_PATH);
   if (configured) return configured;
+  if (selectedClient === "codebuddy") return "codebuddy";
+  const bundled = bundledCodeBuddyCommand({ env, homeDir, platform, pathExists });
+  if (bundled) return bundled;
+  throw new Error("WorkBuddy runtime is unavailable; set MEMORAX_CODE_WORKBUDDY_COMMAND or WORKBUDDY_CODEBUDDY_PATH");
+}
 
-  const metadataCommand = readMetadataCommand(stringValue(pluginRoot) ?? stringValue(env.CODEBUDDY_PLUGIN_ROOT));
-  if (metadataCommand && pathExists(metadataCommand, platform)) return metadataCommand;
-
+function bundledCodeBuddyCommand({ env, homeDir, platform, pathExists }) {
   if (platform === "darwin") {
     for (const root of [join(homeDir, "Applications"), "/Applications"]) {
       for (const appName of APP_NAMES) {
@@ -39,31 +86,26 @@ export function resolveHookCodeBuddyCommand({
     }
   }
   if (platform === "win32") {
+    const localAppData = stringValue(env.LOCALAPPDATA) ?? win32.join(homeDir, "AppData", "Local");
+    const programFiles = stringValue(env.ProgramFiles) ?? "C:\\Program Files";
+    const programFilesX86 = stringValue(env["ProgramFiles(x86)"]) ?? "C:\\Program Files (x86)";
     for (const root of [
-      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "Programs", "WorkBuddy"),
-      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "Programs", "CodeBuddy"),
-      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "WorkBuddy"),
-      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "CodeBuddy"),
-      env.ProgramFiles && win32.join(env.ProgramFiles, "WorkBuddy"),
-      env.ProgramFiles && win32.join(env.ProgramFiles, "CodeBuddy"),
-    ].filter(Boolean)) {
+      win32.join(localAppData, "Programs", "WorkBuddy"),
+      win32.join(localAppData, "Programs", "CodeBuddy"),
+      win32.join(localAppData, "WorkBuddy"),
+      win32.join(localAppData, "CodeBuddy"),
+      win32.join(programFiles, "WorkBuddy"),
+      win32.join(programFiles, "CodeBuddy"),
+      win32.join(programFilesX86, "WorkBuddy"),
+      win32.join(programFilesX86, "CodeBuddy"),
+    ]) {
       for (const segments of WINDOWS_SEGMENTS) {
         const command = win32.join(root, ...segments);
         if (pathExists(command, platform)) return command;
       }
     }
   }
-  return "codebuddy";
-}
-
-function readMetadataCommand(pluginRoot) {
-  if (!pluginRoot) return undefined;
-  try {
-    const metadata = JSON.parse(readFileSync(join(pluginRoot, ".memorax-code-package.json"), "utf8"));
-    return stringValue(metadata?.codeBuddyCommand);
-  } catch {
-    return undefined;
-  }
+  return undefined;
 }
 
 function commandPathExists(command, platform) {

@@ -5,7 +5,7 @@ import { loadMemoraxCodeConfig, type MemoraxCodeConfig } from "../config/memorax
 import { isTraceClient, type TraceClient } from "./context.js";
 
 export const TRACE_CLIENTS: readonly TraceClient[] = ["codex", "claude", "dsh", "opencode"];
-export const TRACE_RUNTIME_CLIENTS: readonly TraceClient[] = [...TRACE_CLIENTS, "codebuddy", "trae"];
+export const TRACE_RUNTIME_CLIENTS: readonly TraceClient[] = [...TRACE_CLIENTS, "codebuddy", "workbuddy", "trae"];
 
 export type ClientTraceConfig = Readonly<{
   enabled: boolean;
@@ -85,6 +85,7 @@ const TRACE_DEFAULT_CONFIGS: Readonly<Record<TraceClient, ClientTraceConfig>> = 
   dsh: DSH_TRACE_DEFAULT_CONFIG,
   opencode: OPENCODE_TRACE_DEFAULT_CONFIG,
   codebuddy: CODEBUDDY_TRACE_DEFAULT_CONFIG,
+  workbuddy: CODEBUDDY_TRACE_DEFAULT_CONFIG,
   trae: TRAE_TRACE_DEFAULT_CONFIG,
 };
 
@@ -94,6 +95,7 @@ const TRACE_ENV_PREFIXES: Readonly<Record<TraceClient, string>> = {
   dsh: "MEMORAX_CODE_DSH_TRACE",
   opencode: "MEMORAX_CODE_OPENCODE_TRACE",
   codebuddy: "MEMORAX_CODE_CODEBUDDY_TRACE",
+  workbuddy: "MEMORAX_CODE_WORKBUDDY_TRACE",
   trae: "MEMORAX_CODE_TRAE_TRACE",
 };
 
@@ -153,15 +155,17 @@ export function clientTraceConfigFromEnv(
 ): ClientTraceConfig {
   assertTraceClient(client);
   const config = fileConfig ?? loadMemoraxCodeConfig(memoraxCodeHomeForTrace(env), { warn: () => undefined });
-  const section = config.trace?.[client];
+  const section = config.trace?.[client] ?? (client === "workbuddy" ? config.trace?.codebuddy : undefined);
   const defaults = TRACE_DEFAULT_CONFIGS[client];
   const prefix = TRACE_ENV_PREFIXES[client];
+  const setting = (suffix: string) => env[`${prefix}_${suffix}`]
+    ?? (client === "workbuddy" ? env[`MEMORAX_CODE_CODEBUDDY_TRACE_${suffix}`] : undefined);
   return {
-    enabled: booleanValue(env[`${prefix}_ENABLED`], section?.enabled ?? defaults.enabled),
-    captureContent: booleanValue(env[`${prefix}_CAPTURE_CONTENT`], section?.capture_content ?? defaults.captureContent),
-    retentionDays: positiveInteger(env[`${prefix}_RETENTION_DAYS`] ?? section?.retention_days, defaults.retentionDays),
-    maxEventChars: positiveInteger(env[`${prefix}_MAX_EVENT_CHARS`] ?? section?.max_event_chars, defaults.maxEventChars),
-    maxFileBytes: positiveInteger(env[`${prefix}_MAX_FILE_BYTES`] ?? section?.max_file_bytes, defaults.maxFileBytes),
+    enabled: booleanValue(setting("ENABLED"), section?.enabled ?? defaults.enabled),
+    captureContent: booleanValue(setting("CAPTURE_CONTENT"), section?.capture_content ?? defaults.captureContent),
+    retentionDays: positiveInteger(setting("RETENTION_DAYS") ?? section?.retention_days, defaults.retentionDays),
+    maxEventChars: positiveInteger(setting("MAX_EVENT_CHARS") ?? section?.max_event_chars, defaults.maxEventChars),
+    maxFileBytes: positiveInteger(setting("MAX_FILE_BYTES") ?? section?.max_file_bytes, defaults.maxFileBytes),
   };
 }
 

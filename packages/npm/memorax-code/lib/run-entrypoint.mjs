@@ -5,7 +5,7 @@ import { unsupportedNodeVersionMessage } from "./node-version.mjs";
 import { resolveNpmExecPath } from "./npm-invocation.mjs";
 import { ensureClaudeCommandEnv } from "./resolve-claude-command.mjs";
 import { ensureCodexCommandEnv } from "./resolve-codex-command.mjs";
-import { ensureCodeBuddyCommandEnv } from "./resolve-codebuddy-command.mjs";
+import { ensureCodeBuddyCommandEnv, ensureWorkBuddyCommandEnv } from "./resolve-codebuddy-command.mjs";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -61,6 +61,7 @@ export async function runBackendEntrypoint(relativeEntrypoint) {
   ensureCodexCommandEnv();
   ensureClaudeCommandEnv();
   ensureCodeBuddyCommandEnv();
+  ensureWorkBuddyCommandEnv();
   ensureBundledSkillEnv();
   ensureClaudeMarketplaceEnv();
   ensureInstallWatchdogEnv();

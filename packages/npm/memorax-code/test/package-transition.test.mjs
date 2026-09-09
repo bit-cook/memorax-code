@@ -371,8 +371,10 @@ async function createFixture({
     ]) {
       await cp(join(packageRoot, "lib", `${name}.mjs`), join(root, "lib", `${name}.mjs`));
     }
-    for (const name of ["automatic-update-state.mjs", "setup-completion.mjs"]) {
-      await cp(join(adapterCommonRoot, name), join(root, "lib", "memorax-code-adapter-common", "src", name));
+    for (const name of ["automatic-update-state.mjs", "setup-completion.mjs", "clients/codebuddy-command.mjs"]) {
+      const target = join(root, "lib", "memorax-code-adapter-common", "src", name);
+      await mkdir(dirname(target), { recursive: true });
+      await cp(join(adapterCommonRoot, name), target);
     }
     // Any accidental npm invocation must fail locally instead of changing the installation.
     await writeFile(join(root, "lib", "npm-invocation.mjs"), [

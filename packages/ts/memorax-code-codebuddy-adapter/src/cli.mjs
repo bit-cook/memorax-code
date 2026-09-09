@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import {
-  defaultCodeBuddyHome,
   disableCodeBuddyAdapter,
   enableCodeBuddyAdapter,
   readCodeBuddyAdapterStatus,
@@ -10,10 +9,10 @@ import {
 try {
   const parsed = parseCli(process.argv);
   if (parsed.help) {
-    console.log("Usage: memorax-code-codebuddy [status|enable|disable|remove] [--codebuddy-home DIR] [--json]");
+    console.log("Usage: memorax-code-codebuddy [status|enable|disable|remove] [--client codebuddy|workbuddy] [--codebuddy-home DIR|--workbuddy-home DIR] [--json]");
     process.exit(0);
   }
-  const options = { codeBuddyHome: parsed.home };
+  const options = { client: parsed.client, codeBuddyHome: parsed.home };
   const result = parsed.command === "status"
     ? await readCodeBuddyAdapterStatus(options)
     : parsed.command === "enable"
@@ -42,17 +41,24 @@ function parseCli(argv) {
   const args = argv.slice(2);
   const command = args[0] && !args[0].startsWith("-") ? args.shift() : "status";
   let home;
+  let client = "codebuddy";
   let json = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--help") return { command, help: true };
     if (arg === "--json") { json = true; continue; }
-    if (arg === "--codebuddy-home") {
+    if (arg === "--client") {
+      client = args[++index];
+      if (client !== "codebuddy" && client !== "workbuddy") throw new Error("--client requires codebuddy or workbuddy");
+      continue;
+    }
+    if (arg === "--codebuddy-home" || arg === "--workbuddy-home") {
+      if (arg === "--workbuddy-home") client = "workbuddy";
       home = args[++index];
-      if (!home || home.startsWith("--")) throw new Error("--codebuddy-home requires a value");
+      if (!home || home.startsWith("--")) throw new Error(`${arg} requires a value`);
       continue;
     }
     throw new Error(`unknown option: ${arg}`);
   }
-  return { command, home: home ?? defaultCodeBuddyHome(), json, help: false };
+  return { command, home, client, json, help: false };
 }

@@ -1,10 +1,10 @@
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, win32 } from "node:path";
 import {
   commandOnPath,
   isExecutableCommand,
 } from "./vscode-extension-command.mjs";
+export { defaultCodeBuddyHome, defaultWorkBuddyHome } from "./memorax-code-adapter-common/src/clients/codebuddy-command.mjs";
 
 const WORKBUDDY_APP_NAMES = ["WorkBuddy.app", "CodeBuddy.app"];
 const WORKBUDDY_BUNDLED_SEGMENTS = [
@@ -22,20 +22,28 @@ const WINDOWS_WORKBUDDY_SEGMENTS = [
 
 export function resolveCodeBuddyCommand({
   env = process.env,
+  platform = process.platform,
+} = {}) {
+  const override = nonEmpty(env.MEMORAX_CODE_CODEBUDDY_COMMAND)
+    ?? nonEmpty(env.CODEBUDDY_CLI_PATH);
+  if (override) return { command: override, source: "configured" };
+  if (commandOnPath("codebuddy", env.PATH, platform, env.PATHEXT)) {
+    return { command: findCommandOnPath("codebuddy", env.PATH, platform, env.PATHEXT), source: "path" };
+  }
+  return { command: "codebuddy", source: "unavailable" };
+}
+
+export function resolveWorkBuddyCommand({
+  env = process.env,
   homeDir = homedir(),
   platform = process.platform,
   applicationRoots = [join(homeDir, "Applications"), "/Applications"],
   windowsRoots = defaultWindowsRoots(env, homeDir),
   pathExists = isExecutableCommand,
 } = {}) {
-  const override = nonEmpty(env.MEMORAX_CODE_CODEBUDDY_COMMAND)
-    ?? nonEmpty(env.CODEBUDDY_CLI_PATH)
+  const override = nonEmpty(env.MEMORAX_CODE_WORKBUDDY_COMMAND)
     ?? nonEmpty(env.WORKBUDDY_CODEBUDDY_PATH);
   if (override) return { command: override, source: "configured" };
-
-  if (commandOnPath("codebuddy", env.PATH, platform, env.PATHEXT)) {
-    return { command: findCommandOnPath("codebuddy", env.PATH, platform, env.PATHEXT), source: "path" };
-  }
 
   if (platform === "darwin") {
     for (const root of applicationRoots) {
@@ -81,20 +89,11 @@ export function ensureCodeBuddyCommandEnv(options = {}) {
   return resolved;
 }
 
-export function defaultCodeBuddyHome(
-  env = process.env,
-  homeDir = homedir(),
-  platform = process.platform,
-  pathExists = existsSync,
-) {
-  const configured = nonEmpty(env.CODEBUDDY_HOME) ?? nonEmpty(env.WORKBUDDY_HOME);
-  if (configured) return configured;
-  if (platform !== "win32") return join(homeDir, ".workbuddy");
-  const workBuddyHome = win32.join(homeDir, ".workbuddy");
-  const legacyCodeBuddyHome = win32.join(homeDir, ".codebuddy");
-  return pathExists(workBuddyHome) || !pathExists(legacyCodeBuddyHome)
-    ? workBuddyHome
-    : legacyCodeBuddyHome;
+export function ensureWorkBuddyCommandEnv(options = {}) {
+  const env = options.env ?? process.env;
+  const resolved = resolveWorkBuddyCommand({ ...options, env });
+  if (resolved.source !== "unavailable") env.MEMORAX_CODE_WORKBUDDY_COMMAND = resolved.command;
+  return resolved;
 }
 
 function defaultWindowsRoots(env, homeDir) {

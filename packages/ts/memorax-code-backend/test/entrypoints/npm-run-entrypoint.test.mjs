@@ -31,6 +31,12 @@ async function copyNpmEntrypointFixture() {
     join(repoRoot, "packages", "npm", "memorax-code", "lib", "resolve-codebuddy-command.mjs"),
     join(packageRoot, "lib", "resolve-codebuddy-command.mjs"),
   );
+  const commonClientsRoot = join(packageRoot, "lib", "memorax-code-adapter-common", "src", "clients");
+  await mkdir(commonClientsRoot, { recursive: true });
+  await copyFile(
+    join(repoRoot, "packages", "ts", "memorax-code-adapter-common", "src", "clients", "codebuddy-command.mjs"),
+    join(commonClientsRoot, "codebuddy-command.mjs"),
+  );
   await copyFile(
     join(repoRoot, "packages", "npm", "memorax-code", "lib", "windows-cli-invocation.mjs"),
     join(packageRoot, "lib", "windows-cli-invocation.mjs"),

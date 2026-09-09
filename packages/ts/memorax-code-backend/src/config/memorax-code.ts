@@ -17,6 +17,7 @@ export type MemoraxCodeConfig = Readonly<{
     dsh?: boolean;
     opencode?: boolean;
     codebuddy?: boolean;
+    workbuddy?: boolean;
     trae?: boolean;
   }>;
   memorax?: Readonly<{
@@ -109,6 +110,13 @@ export type MemoraxCodeConfig = Readonly<{
       max_event_chars?: number;
       max_file_bytes?: number;
     }>;
+    workbuddy?: Readonly<{
+      enabled?: boolean;
+      capture_content?: boolean;
+      retention_days?: number;
+      max_event_chars?: number;
+      max_file_bytes?: number;
+    }>;
     trae?: Readonly<{
       enabled?: boolean;
       capture_content?: boolean;
@@ -189,6 +197,10 @@ export function renderDefaultMemoraxCodeConfig(): string {
     "[trace.codebuddy]",
     "enabled = true # Enable local CodeBuddy session memory trace collection.",
     "capture_content = true # Store content in local CodeBuddy trace events.",
+    "",
+    "[trace.workbuddy]",
+    "enabled = true # Enable local WorkBuddy session memory trace collection.",
+    "capture_content = true # Store content in local WorkBuddy trace events.",
     "",
     "[trace.trae]",
     "enabled = true # Enable local Trae session memory trace collection.",
@@ -276,6 +288,8 @@ function normalizeMemoraxCodeConfig(value: unknown): MemoraxCodeConfig {
   const traceDsh = recordValue(trace?.dsh);
   const traceOpenCode = recordValue(trace?.opencode);
   const traceCodeBuddy = recordValue(trace?.codebuddy);
+  // Older WorkBuddy installations stored their trace preferences under codebuddy.
+  const traceWorkBuddy = recordValue(trace?.workbuddy) ?? traceCodeBuddy;
   const traceTrae = recordValue(trace?.trae);
 
   return (prune({
@@ -285,6 +299,7 @@ function normalizeMemoraxCodeConfig(value: unknown): MemoraxCodeConfig {
       dsh: booleanField(clients, "dsh"),
       opencode: booleanField(clients, "opencode"),
       codebuddy: booleanField(clients, "codebuddy"),
+      workbuddy: booleanField(clients, "workbuddy"),
       trae: booleanField(clients, "trae"),
     }),
     memorax: prune({
@@ -371,6 +386,13 @@ function normalizeMemoraxCodeConfig(value: unknown): MemoraxCodeConfig {
         max_event_chars: numberField(traceCodeBuddy, "max_event_chars"),
         max_file_bytes: numberField(traceCodeBuddy, "max_file_bytes"),
       }),
+      workbuddy: prune({
+        enabled: booleanField(traceWorkBuddy, "enabled"),
+        capture_content: booleanField(traceWorkBuddy, "capture_content"),
+        retention_days: numberField(traceWorkBuddy, "retention_days"),
+        max_event_chars: numberField(traceWorkBuddy, "max_event_chars"),
+        max_file_bytes: numberField(traceWorkBuddy, "max_file_bytes"),
+      }),
       trae: prune({
         enabled: booleanField(traceTrae, "enabled"),
         capture_content: booleanField(traceTrae, "capture_content"),
@@ -390,7 +412,7 @@ function validateRawLifecycleConfig(value: unknown, path: string): void {
   if (rawClients !== undefined) {
     const clients = tableValue(rawClients);
     if (!clients) throw invalidLifecycleConfig(path, "clients must be a table");
-    for (const field of ["codex", "claude", "dsh", "opencode", "codebuddy", "trae"] as const) {
+    for (const field of ["codex", "claude", "dsh", "opencode", "codebuddy", "workbuddy", "trae"] as const) {
       if (clients[field] !== undefined && typeof clients[field] !== "boolean") {
         throw invalidLifecycleConfig(path, `clients.${field} must be a boolean`);
       }

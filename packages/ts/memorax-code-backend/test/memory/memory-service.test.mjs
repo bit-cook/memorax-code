@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createBackendState } from "../../dist/app/state.js";
 import { createMemoryService } from "../../dist/memory/service.js";
+import { clientTracePaths } from "../../dist/trace/config.js";
 
 test("Backend state does not own the memory service", () => {
   const state = createBackendState("127.0.0.1");
@@ -91,6 +92,68 @@ test("memory service exposes a sealed Hook facade and closes idempotently", asyn
   } finally {
     service.close();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CodeBuddy and WorkBuddy isolate equal native IDs through service writeback and trace", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "memorax-codebuddy-trace-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const sessionId = "trace-completed";
+  const prompt = "remember this";
+  const turnId = codeBuddyTurnId(sessionId, prompt);
+  const requests = [];
+  const service = createMemoryService({
+    env: {
+      MEMORAX_CODE_HOME: home,
+      MEMORAX_CODE_MEMORY_RETRIEVAL_ENABLED: "false",
+      MEMORAX_CODE_MEMORY_WRITEBACK_ENABLED: "true",
+      MEMORAX_CODE_MEMORY_WRITEBACK_BUFFER_ENABLED: "false",
+      MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
+      MEMORAX_CODE_MEMORAX_API_KEY: "secret",
+      MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
+    },
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ success: true, data: { task_id: "saved", status: "queued" } }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  try {
+    const commands = [];
+    for (const client of ["codebuddy", "workbuddy"]) {
+      const cwd = join(home, client);
+      const transcriptPath = join(home, `${client}.jsonl`);
+      await mkdir(cwd);
+      await writeFile(transcriptPath, [
+        { id: "u1", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: `<user_query>${prompt}</user_query>` }] },
+        { id: "a1", type: "message", role: "assistant", parentId: "u1", status: "completed", content: [{ type: "output_text", text: `${client} done` }] },
+      ].map((record) => JSON.stringify(record)).join("\n") + "\n");
+      const start = { version: 1, sessionId, turnId, transcriptPath, prompt, client, cwd };
+      commands.push(start);
+      await service.recordTurnStart(start);
+    }
+    for (const start of commands) {
+      assert.deepEqual(await service.writebackTurn(start), { ok: true, scheduled: true });
+    }
+    await service.drain();
+    assert.equal(requests.length, 2);
+    for (const [index, { client }] of commands.entries()) {
+      assert.equal(requests[index].user_id, `user-1@${client}`);
+      assert.equal(requests[index].session_id, sessionId);
+      assert.equal(requests[index].messages[1].content, `${client} done`);
+      const paths = clientTracePaths(client, home);
+      const events = (await readFile(paths.eventsJsonl(sessionId), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      assert.deepEqual(events.map((event) => event.type), ["turn_start", "turn_end", "turn_materialized"]);
+      assert.ok(events.every((event) => event.trace.client === client && event.trace.session_id === sessionId));
+      assert.equal(events[0].source, `${client}-hook`);
+      assert.equal(events[1].outcome, "completed");
+      assert.equal(events[2].source, `${client}-transcript`);
+      const current = JSON.parse(await readFile(paths.sessionCurrentTurnPath(sessionId), "utf8"));
+      assert.equal(current.turn_state, "completed");
+    }
+  } finally {
+    service.close();
   }
 });
 

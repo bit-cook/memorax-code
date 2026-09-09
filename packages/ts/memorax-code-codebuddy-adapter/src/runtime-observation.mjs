@@ -1,19 +1,21 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-export function codeBuddyRuntimeObservationPath(memoraxCodeHome) {
-  return join(memoraxCodeHome, "adapters", "codebuddy", "runtime-observed.json");
+export function codeBuddyRuntimeObservationPath(memoraxCodeHome, client = "codebuddy") {
+  return join(memoraxCodeHome, "adapters", client, "runtime-observed.json");
 }
 
 export async function writeCodeBuddyRuntimeObservation({
   memoraxCodeHome,
   codeBuddyHome,
   pluginRoot,
+  client = "codebuddy",
 }) {
   const pluginVersion = await readPluginVersion(pluginRoot);
-  const path = codeBuddyRuntimeObservationPath(memoraxCodeHome);
+  const path = codeBuddyRuntimeObservationPath(memoraxCodeHome, client);
   const record = {
     version: 1,
+    client,
     pluginVersion,
     codeBuddyHome,
     observedAt: new Date().toISOString(),
@@ -25,13 +27,14 @@ export async function writeCodeBuddyRuntimeObservation({
   return record;
 }
 
-export async function readCodeBuddyRuntimeObservation(memoraxCodeHome) {
+export async function readCodeBuddyRuntimeObservation(memoraxCodeHome, client = "codebuddy") {
   try {
-    const value = JSON.parse(await readFile(codeBuddyRuntimeObservationPath(memoraxCodeHome), "utf8"));
-    if (!isRecord(value) || !hasExactKeys(value, ["codeBuddyHome", "observedAt", "pluginVersion", "version"])) {
+    const value = JSON.parse(await readFile(codeBuddyRuntimeObservationPath(memoraxCodeHome, client), "utf8"));
+    if (!isRecord(value) || !hasExactKeys(value, ["client", "codeBuddyHome", "observedAt", "pluginVersion", "version"])) {
       return undefined;
     }
     if (value.version !== 1
+      || value.client !== client
       || !stringValue(value.pluginVersion)
       || !stringValue(value.codeBuddyHome)
       || !validTimestamp(value.observedAt)) return undefined;

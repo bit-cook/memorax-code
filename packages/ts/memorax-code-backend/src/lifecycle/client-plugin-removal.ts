@@ -76,6 +76,7 @@ export type ClientPluginRemovalOptions = {
   dshAdapterRoot?: string;
   openCodeConfigDir?: string;
   codeBuddyHome?: string;
+  workBuddyHome?: string;
   traeHome?: string;
   codexCommand?: string;
   claudeCommand?: string;
@@ -90,6 +91,7 @@ export type ClientPluginRemovalReport = {
   dshPlugin: DshPluginRemovalReport | ClientPluginRemovalFailure;
   opencodePlugin: OpenCodePluginRemovalReport | ClientPluginRemovalFailure;
   codebuddyPlugin: CodeBuddyPluginRemovalReport | ClientPluginRemovalFailure;
+  workbuddyPlugin: CodeBuddyPluginRemovalReport | ClientPluginRemovalFailure;
   traePlugin: TraePluginRemovalReport | ClientPluginRemovalFailure;
 };
 
@@ -118,7 +120,7 @@ export async function prepareClientPluginRemovalCleanup(
   return async () => {
     try {
       return await withBackendLifecycleLock({ home: memoraxCodeHome }, async () => {
-        const [codexPlugin, claudePlugin, dshPlugin, opencodePlugin, codebuddyPlugin, traePlugin] = await Promise.all([
+        const [codexPlugin, claudePlugin, dshPlugin, opencodePlugin, codebuddyPlugin, workbuddyPlugin, traePlugin] = await Promise.all([
           cleanupCodexAfterBackendRemoval({
             memoraxCodeHome,
             homeDir: home,
@@ -154,19 +156,27 @@ export async function prepareClientPluginRemovalCleanup(
               ...(options.codeBuddyHome ? { codeBuddyHome: options.codeBuddyHome } : {}),
             }))
             .catch((error) => removalFailure("codebuddy-plugin-remove", error)),
+          Promise.resolve()
+            .then(() => codeBuddyPluginInstaller.removeCodeBuddyPluginInstallation({
+              client: "workbuddy",
+              memoraxCodeHome,
+              ...(options.workBuddyHome ? { codeBuddyHome: options.workBuddyHome } : {}),
+            }))
+            .catch((error) => removalFailure("workbuddy-plugin-remove", error)),
           traePluginInstaller.removeTraeAdapterInstallation({
             memoraxCodeHome,
             ...(traeHome ? { traeHome } : {}),
           }).catch((error) => removalFailure("trae-adapter-remove", error)),
         ]);
         return {
-          ok: codexPlugin.ok && claudePlugin.ok && dshPlugin.ok && opencodePlugin.ok && codebuddyPlugin.ok && traePlugin.ok,
+          ok: codexPlugin.ok && claudePlugin.ok && dshPlugin.ok && opencodePlugin.ok && codebuddyPlugin.ok && workbuddyPlugin.ok && traePlugin.ok,
           action: "client-plugin-removal-cleanup" as const,
           codexPlugin,
           claudePlugin,
           dshPlugin,
           opencodePlugin,
           codebuddyPlugin,
+          workbuddyPlugin,
           traePlugin,
         };
       });
@@ -180,6 +190,7 @@ export async function prepareClientPluginRemovalCleanup(
         dshPlugin: failure,
         opencodePlugin: failure,
         codebuddyPlugin: failure,
+        workbuddyPlugin: failure,
         traePlugin: failure,
       };
     }

@@ -20,6 +20,7 @@ async function createPackageFixture(version) {
   await cp(join(packageRoot, "lib", "node-version.mjs"), join(root, "lib", "node-version.mjs"));
   await cp(join(packageRoot, "lib", "npm-invocation.mjs"), join(root, "lib", "npm-invocation.mjs"));
   for (const name of [
+    "clients/codebuddy-command.mjs",
     "config-utils.mjs",
     "automatic-update-state.mjs",
     "runtime-record.mjs",

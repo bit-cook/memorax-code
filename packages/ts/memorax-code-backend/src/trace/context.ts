@@ -12,10 +12,11 @@ export type TraceContextOrigin =
   | "dsh-session-event-log"
   | "opencode-hook-body"
   | "codebuddy-hook-body"
+  | "workbuddy-hook-body"
   | "trae-hook-body"
   | "current-turn-file"
   | "manual";
-export type TraceClient = "codex" | "claude" | "dsh" | "opencode" | "codebuddy" | "trae";
+export type TraceClient = "codex" | "claude" | "dsh" | "opencode" | "codebuddy" | "workbuddy" | "trae";
 
 export type TraceRelatedTurn = Readonly<{
   turnId?: string;
@@ -117,17 +118,19 @@ export function traceContextFromCodeBuddyHookBody(
   if (!isRecord(body)) return undefined;
   const sessionId = stringField(body, "session_id") ?? stringField(body, "sessionId");
   if (!sessionId) return undefined;
+  if (body.client !== undefined && body.client !== "codebuddy" && body.client !== "workbuddy") return undefined;
+  const client = body.client ?? "codebuddy";
   const cwd = stringField(body, "cwd");
   return pruneTraceContext({
     schemaVersion: "1",
-    client: "codebuddy",
+    client,
     sessionId,
     turnId: stringField(body, "turn_id") ?? stringField(body, "turnId"),
     transcriptPath: stringField(body, "transcript_path") ?? stringField(body, "transcriptPath"),
     cwd,
     memoryProject: resolveMemoryProject(cwd),
     workspaceKind: stringField(body, "workspace_kind") ?? stringField(body, "workspaceKind"),
-    contextOrigin: "codebuddy-hook-body",
+    contextOrigin: `${client}-hook-body`,
     capturedAt,
   });
 }
@@ -240,6 +243,7 @@ export function isTraceClient(value: unknown): value is TraceClient {
     || value === "dsh"
     || value === "opencode"
     || value === "codebuddy"
+    || value === "workbuddy"
     || value === "trae";
 }
 

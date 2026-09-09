@@ -188,7 +188,7 @@ test("automatic memory writeback removes natural memory impact for every support
     "",
     answer,
   ].join("\n");
-  const clients = ["codex", "claude-code", "dsh", "opencode", "codebuddy", "trae"];
+  const clients = ["codex", "claude-code", "dsh", "opencode", "codebuddy", "workbuddy", "trae"];
   try {
     for (const client of clients) {
       assert.deepEqual(runtime.enqueue({
@@ -480,22 +480,22 @@ test("automatic memory writeback never merges clients with the same repository a
     fetchImpl: memoraxFetch(requests),
   });
   try {
-    enqueue("codex", "one");
-    enqueue("claude-code", "one");
+    enqueue("codebuddy", "one");
+    enqueue("workbuddy", "one");
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(requests.length, 0);
 
-    enqueue("codex", "two");
-    enqueue("claude-code", "two");
+    enqueue("codebuddy", "two");
+    enqueue("workbuddy", "two");
     await waitFor(() => requests.length === 2, "client-scoped writeback buffers did not flush");
 
     assert.deepEqual(requests.map((request) => request.body.messages.map((message) => message.content)), [
-      ["codex prompt one.", "codex answer one.", "codex prompt two.", "codex answer two."],
+      ["codebuddy prompt one.", "codebuddy answer one.", "codebuddy prompt two.", "codebuddy answer two."],
       [
-        "claude-code prompt one.",
-        "claude-code answer one.",
-        "claude-code prompt two.",
-        "claude-code answer two.",
+        "workbuddy prompt one.",
+        "workbuddy answer one.",
+        "workbuddy prompt two.",
+        "workbuddy answer two.",
       ],
     ]);
     assert.notEqual(

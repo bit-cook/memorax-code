@@ -57,7 +57,7 @@ test("memorax-code lifecycle installs and disables only managed Trae Hooks", asy
     const installedHooks = JSON.parse(await readFile(hooksPath, "utf8"));
     assert.equal(installedHooks.customSetting, true);
     assert.equal(JSON.stringify(installedHooks).includes("user-owned-hook"), true);
-    assert.equal((JSON.stringify(installedHooks).match(/--memorax-code-trae-hook-v1/g) ?? []).length, 3);
+    assert.equal(traeHookCount(installedHooks), 3);
     assert.equal(await pathExists(join(traeHome, "skills", "memorax-code", "SKILL.md")), true);
 
     const status = await runCli(cliPath, ["status", "--json", ...args]);
@@ -72,9 +72,77 @@ test("memorax-code lifecycle installs and disables only managed Trae Hooks", asy
     const stoppedHooks = JSON.parse(await readFile(hooksPath, "utf8"));
     assert.equal(stoppedHooks.customSetting, true);
     assert.equal(JSON.stringify(stoppedHooks).includes("user-owned-hook"), true);
-    assert.equal(JSON.stringify(stoppedHooks).includes("--memorax-code-trae-hook-v1"), false);
+    assert.equal(traeHookCount(stoppedHooks), 0);
   } finally {
     await runCli(cliPath, ["stop", "--json", ...args]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+function traeHookCount(config) {
+  return Object.values(config.hooks).flatMap((groups) => groups)
+    .flatMap((group) => group.hooks ?? [])
+    .filter(({ command = "" }) => {
+      const encoded = / -EncodedCommand ([A-Za-z0-9+/=]+)$/.exec(command)?.[1];
+      const script = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
+      return script.includes("--memorax-code-trae-hook-v1");
+    }).length;
+}
+
+test("CodeBuddy and WorkBuddy retain separate homes through partial stop and uninstall", { timeout: 30_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-buddy-clients-"));
+  const home = join(root, "backend");
+  const codeBuddyHome = join(root, "cli-config");
+  const workBuddyHome = join(root, "desktop-config");
+  const port = await freePort();
+  const cliPath = fileURLToPath(new URL("../../dist/memorax-code.js", import.meta.url));
+  const args = ["--home", home, "--port", String(port), "--json"];
+  const env = { MEMORAX_CODE_CODEBUDDY_COMMAND: process.execPath, MEMORAX_CODE_WORKBUDDY_COMMAND: process.execPath };
+  const pluginId = "memorax-code-codebuddy-adapter@memorax-code-local";
+  try {
+    const start = await runCli(cliPath, ["start", ...args, "--clients", "codebuddy,workbuddy",
+      "--codebuddy-home", codeBuddyHome, "--workbuddy-home", workBuddyHome], { env });
+    assert.equal(start.code, 0, start.stdout + start.stderr);
+    const started = JSON.parse(start.stdout);
+    assert.equal(started.codebuddyAdapter.runtime, "codebuddy");
+    assert.equal(started.workbuddyAdapter.runtime, "workbuddy");
+    const installationPath = join(home, "adapters", "workbuddy", "installation.json");
+    const installation = JSON.parse(await readFile(installationPath, "utf8"));
+    await writeFile(installationPath, JSON.stringify({ ...installation, legacyClientAlias: true }));
+    const legacyHomeStart = await runCli(cliPath, ["start", ...args, "--preserve-clients", "--codebuddy-home", workBuddyHome], { env });
+    assert.equal(legacyHomeStart.code, 0, legacyHomeStart.stdout + legacyHomeStart.stderr);
+    assert.equal(JSON.parse(legacyHomeStart.stdout).codebuddyAdapter.codeBuddyHome, codeBuddyHome);
+    assert.equal(JSON.parse(legacyHomeStart.stdout).workbuddyAdapter.codeBuddyHome, workBuddyHome);
+    const workBuddyOnly = await runCli(cliPath, ["start", ...args, "--clients", "workbuddy", "--codebuddy-home", workBuddyHome], { env });
+    assert.equal(workBuddyOnly.code, 0, workBuddyOnly.stdout + workBuddyOnly.stderr);
+    assert.equal(JSON.parse(workBuddyOnly.stdout).workbuddyAdapter.codeBuddyHome, workBuddyHome);
+    assert.equal(JSON.parse(await readFile(join(codeBuddyHome, "settings.json"), "utf8")).enabledPlugins[pluginId], false);
+    assert.equal(JSON.parse(await readFile(join(workBuddyHome, "settings.json"), "utf8")).enabledPlugins[pluginId], true);
+    for (const selection of [["--clients", "codebuddy"], ["--preserve-clients"]]) {
+      const cliOnly = await runCli(cliPath, ["start", ...args, ...selection], { env });
+      assert.equal(cliOnly.code, 0, cliOnly.stdout + cliOnly.stderr);
+      assert.equal(JSON.parse(cliOnly.stdout).workbuddyAdapter, undefined);
+      assert.equal(JSON.parse(await readFile(join(workBuddyHome, "settings.json"), "utf8")).enabledPlugins[pluginId], false);
+    }
+    const both = await runCli(cliPath, ["start", ...args, "--clients", "codebuddy,workbuddy"], { env });
+    assert.equal(both.code, 0, both.stdout + both.stderr);
+    const workBuddySettings = await readFile(join(workBuddyHome, "settings.json"), "utf8");
+    const stop = await runCli(cliPath, ["stop", ...args, "--clients", "codebuddy"], { env });
+    assert.equal(stop.code, 0, stop.stdout + stop.stderr);
+    assert.equal(JSON.parse(stop.stdout).backend.reason, "active_clients_remaining");
+    assert.equal(await readFile(join(workBuddyHome, "settings.json"), "utf8"), workBuddySettings);
+    assert.equal(JSON.parse(await readFile(join(codeBuddyHome, "settings.json"), "utf8")).enabledPlugins[pluginId], false);
+    const uninstall = await runCli(cliPath, ["uninstall", ...args, "--clients", "codebuddy", "--no-npm-uninstall"], { env });
+    assert.equal(uninstall.code, 0, uninstall.stdout + uninstall.stderr);
+    assert.equal(JSON.parse(uninstall.stdout).npmPackageRemoval.reason, "partial_client_uninstall");
+    assert.equal(await readFile(join(workBuddyHome, "settings.json"), "utf8"), workBuddySettings);
+    assert.equal(await pathExists(join(codeBuddyHome, "plugins", "marketplaces", "memorax-code-local")), false);
+    const status = await runCli(cliPath, ["status", ...args], { env });
+    assert.equal(status.code, 0, status.stdout + status.stderr);
+    assert.equal(JSON.parse(status.stdout).workbuddyAdapter.enabled, true);
+    assert.equal(JSON.parse(status.stdout).codebuddyAdapter, undefined);
+  } finally {
+    await runCli(cliPath, ["stop", ...args, "--clients", "codebuddy,workbuddy"], { env });
     await rm(root, { recursive: true, force: true });
   }
 });

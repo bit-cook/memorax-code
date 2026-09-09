@@ -1,15 +1,33 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { test } from "node:test";
-import {
+import { after, test } from "node:test";
+import { pathToFileURL } from "node:url";
+
+const fixtureRoot = await mkdtemp(join(tmpdir(), "memorax-code-entrypoint-module-"));
+after(() => rm(fixtureRoot, { recursive: true, force: true }));
+const libRoot = join(fixtureRoot, "lib");
+const commonRoot = join(libRoot, "memorax-code-adapter-common", "src", "clients");
+await mkdir(commonRoot, { recursive: true });
+for (const name of [
+  "run-entrypoint", "node-version", "npm-invocation", "resolve-claude-command",
+  "resolve-codex-command", "resolve-codebuddy-command", "vscode-extension-command",
+  "windows-cli-invocation",
+]) {
+  await copyFile(new URL(`../lib/${name}.mjs`, import.meta.url), join(libRoot, `${name}.mjs`));
+}
+await copyFile(
+  new URL("../../../ts/memorax-code-adapter-common/src/clients/codebuddy-command.mjs", import.meta.url),
+  join(commonRoot, "codebuddy-command.mjs"),
+);
+const {
   ensureClaudeMarketplaceEnv,
   ensureInstallWatchdogEnv,
   ensureNpmPackageRuntimeEnv,
   installWatchPathsForPackageRoot,
-} from "../lib/run-entrypoint.mjs";
+} = await import(pathToFileURL(join(libRoot, "run-entrypoint.mjs")).href);
 
 test("package entrypoint preserves a verified Windows npm CLI path", async () => {
   const packageRoot = await mkdtemp(`${tmpdir()}/memorax-code-npm-runtime-`);
