@@ -216,6 +216,10 @@ MemoraX Code 会先比较含义：语义相同的请求不重复写入；长期�
 [本地 trace 配置](docs/configuration.md#local-traces)改为仅记录元数据，或关闭对应客户端的 trace。
 关闭 trace 后仍会保留必要的本地会话状态，以保证记忆操作使用正确的工作区范围。
 
+Coding Memory 按仓库或工作区确定范围。Codex、WorkBuddy 和 OpenCode 中符合识别规则的
+默认聊天目录，会在相同的 MemoraX 用户 ID 配置下共享 `General`。已有记忆不会自动迁移，目录规则详见
+[记忆范围](docs/configuration.md#memory-scope)。
+
 游客额度提醒可能显示完整的 Mark ID；请将包含该信息的提醒文本和本地 trace 视为敏感信息。
 
 主动记忆操作会将查询或选中的内容发送至 MemoraX。自动写回会从受信任工作区的任务中，发送经过

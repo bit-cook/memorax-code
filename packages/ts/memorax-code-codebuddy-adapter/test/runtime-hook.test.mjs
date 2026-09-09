@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,6 +140,42 @@ test("UserPromptSubmit applies the configured reminder cadence to native turn id
       provisionalTurnId("session-cadence", 0, "prompt 3"),
     ]);
   } finally { await server.close(); }
+});
+
+test("managed default WorkBuddy cwd is pinned through Stop and explicit workspace kind wins", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-default-"));
+  const requests = [];
+  const server = await startServer(requests, { ok: true });
+  try {
+    const userData = join(root, "native-app");
+    const workspaceRoot = join(root, "custom-tasks");
+    const cwd = join(workspaceRoot, "2026-09-08-11-25-30");
+    const transcriptPath = join(root, "session.jsonl");
+    await mkdir(userData, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    await writeFile(join(userData, "app-config.json"), JSON.stringify({ defaultWorkspacePath: workspaceRoot }));
+    await writeFile(transcriptPath, "");
+    const hookEnv = { WORKBUDDY_USER_DATA_DIR: userData };
+    for (const explicitKind of [undefined, "local"]) {
+      const sessionId = `default-${explicitKind ?? "detected"}`;
+      const start = await runHook({
+        hook_event_name: "UserPromptSubmit", session_id: sessionId, transcript_path: transcriptPath,
+        prompt: "Prompt", cwd, ...(explicitKind ? { workspace_kind: explicitKind } : {}),
+      }, { root, server, hookEnv });
+      assert.equal(start.status, 0, start.stderr);
+      const stop = await runHook({
+        hook_event_name: "Stop", session_id: sessionId, transcript_path: transcriptPath, cwd: root,
+      }, { root, server, hookEnv });
+      assert.equal(stop.status, 0, stop.stderr);
+      const turnRequests = requests.filter((request) => request.body?.sessionId === sessionId
+        && ["/memory/turn-start", "/memory/writeback"].includes(request.path));
+      assert.deepEqual(turnRequests.map((request) => request.body.workspaceKind), [explicitKind ?? "projectless", explicitKind ?? "projectless"]);
+      assert.equal(turnRequests[1].body.cwd, cwd, "Stop preserves the accepted prompt workspace");
+    }
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("UserPromptSubmit exposes a Backend user notice without model context", async () => {

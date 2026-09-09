@@ -410,10 +410,29 @@ Important distinctions:
   client's exact writeback source and owning tests.
 - Required client/session/turn identity and repository scope fail closed when
   incomplete, conflicting, or unprovable.
+- Adapters identify supported default chat directories as `projectless`;
+  `repository/scope.ts` resolves them to `scopeKind: general` and the shared
+  remote identity `<base-user-id>@General`. Verified Git identity takes
+  precedence. Recognition is client-owned; scope derivation stays shared.
+  General sharing does not merge client/session identity or physical workspace
+  keys. The [directory rules](docs/configuration.md#memory-scope) apply to Codex,
+  WorkBuddy, and OpenCode; ordinary workspaces retain their existing rules.
+  Codex can recover an unbound session's General root from the matching
+  rollout's first `session_meta` record when a new Turn resumes in a child
+  directory. The native initial cwd must match the shared Codex default-directory
+  recognizer, and both Hook and registered cwd must remain inside that root
+  without intervening Git authority. Recovery runs within session serialization,
+  never replaces a live binding, and does not depend on retained trace records.
+  A General session that initially has no cwd may acquire its first physical
+  root only when the corresponding client default-directory recognizer validates
+  that root and Git resolution still yields General. This one-time completion
+  preserves the remote namespace and pending QA, including a Turn whose cwd
+  first arrives at Stop; subsequent changes to the bound root remain mismatches.
 - A malformed or incomplete direct `.git` directory is the sole documented
   folder-scope fallback. That degraded scope may upgrade in-session only to a
   verified Git scope with the same Base User ID and canonical workspace root;
-  for a fixed Base User ID, other scope changes remain mismatches. A changed
+  for a fixed Base User ID, other scope changes beyond the General first-root
+  completion above remain mismatches. A changed
   Base User ID requires a new binding; existing Turn metadata remains subject
   to the coordinator's scope validation.
 - Local mode may authorize loopback requests without a configured token. Token
@@ -492,6 +511,18 @@ local-trace components. Manual Add additionally validates user-supplied
 `--reason` metadata. The direct entrypoint is not permission to fall back to
 unscoped provider calls or to reconstruct identity from unrelated process
 state.
+
+In an integrated client, the CLI validates the exact current-Turn context to
+reuse its workspace kind, including `projectless`, so explicit Add/Search and
+automatic writeback resolve the same General scope. WorkBuddy/CodeBuddy tools
+can supply native `CODEBUDDY_SESSION_ID` when the SessionStart environment-file
+bridge is unavailable. Without that context,
+standalone commands resolve their working directory. General changes the
+remote namespace for subsequent operations; it neither migrates old memory nor
+searches both the old and new namespaces.
+Even when the current Turn has a projectless hint without cwd, the CLI validates
+its command directory before using General. Git scope conflicts and unreadable
+paths reject the operation before any provider request.
 
 After a degraded direct `.git` directory is repaired, each CLI operation
 resolves the verified Git scope immediately; no client-session restart is

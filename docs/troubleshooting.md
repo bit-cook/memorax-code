@@ -545,8 +545,9 @@ Common causes are:
 - local DNS, proxy, or network failure.
 
 MemoraX Code reads filesystem Git metadata without executing Git. Linked
-worktrees share the remote repository identity; non-Git workspaces use the
-normalized folder name. Resolution never falls back to the bare base user ID.
+worktrees share the remote repository identity; ordinary non-Git workspaces use
+the normalized folder name. Recognized default chat directories share
+`General`. Resolution never falls back to the bare base user ID.
 
 A live Codex, Claude Code, DSH, or OpenCode session remains pinned to the
 repository or local workspace resolved at the start of the session. Starting
@@ -575,9 +576,12 @@ session from the target repository or local workspace and verify that its
 `.git` metadata is readable and valid. These failures stop Search or Add before
 any request is sent to MemoraX.
 
-Codex projectless tasks under its canonical dated-task location intentionally
-use the shared `Codex-General` memory name. Open a task in a real workspace
-when repository isolation matters.
+Recognized default chat directories in Codex, WorkBuddy, and OpenCode
+intentionally share `General` under the same Base User ID. Check the
+[directory rules](configuration.md#memory-scope) if the scope is unexpected;
+ordinary selected directories and verified Git repositories keep their normal
+scope. Existing memories under `Codex-General` or the previous default-folder
+names are not migrated or searched together with `General`.
 
 ## Model-provider requests fail while MemoraX Code is healthy
 

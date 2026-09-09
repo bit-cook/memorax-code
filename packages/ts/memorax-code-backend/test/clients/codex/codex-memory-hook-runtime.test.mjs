@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runMemoryCli } from "../../../dist/memory/cli.js";
 import { createCodexMemoryHookRuntime } from "../../../dist/clients/codex/memory-hook-runtime.js";
 import { tracePaths } from "../../../dist/trace/config.js";
 import {
@@ -550,7 +551,7 @@ test("memory hook upgrades automatic writeback after direct Git metadata is repa
   }
 });
 
-test("memory hook maps different Codex projectless task directories to Codex-General", async () => {
+test("memory hook and nested Skill commands share General across Codex projectless task directories", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-projectless-"));
   const firstTask = join(root, "2026-07-13", "w");
   const secondTask = join(root, "2026-07-14", "new-chat-2");
@@ -566,8 +567,21 @@ test("memory hook maps different Codex projectless task directories to Codex-Gen
     prompt: "Recall it in another projectless task.",
     reply: "Used the same general scope.",
   }]);
-  const { fetchImpl, requests } = memoraxAddFetch();
-  const controller = createCodexMemoryHookRuntime({ env: WRITEBACK_ENV, fetchImpl });
+  const env = {
+    ...WRITEBACK_ENV,
+    MEMORAX_CODE_HOME: join(root, "home"),
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
+  };
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), body: JSON.parse(init.body) });
+    const data = String(url).endsWith("/add") ? { task_id: "general-add", status: "queued" } : { data: [] };
+    return new Response(JSON.stringify({ success: true, data }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const controller = createCodexMemoryHookRuntime({ env, fetchImpl });
   try {
     await controller.recordTurnStart({
       sessionId: "session-projectless-1",
@@ -602,13 +616,139 @@ test("memory hook maps different Codex projectless task directories to Codex-Gen
     }), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 2, "projectless hook writebacks did not call MemoraX add");
     assert.deepEqual(requests.map((request) => request.body.user_id), [
-      "user-1@Codex-General",
-      "user-1@Codex-General",
+      "user-1@General",
+      "user-1@General",
     ]);
-    assert.equal(requests[0].body.metadata.memorax_code_memory_scope, "codex-projectless.v1");
-    assert.equal(requests[0].body.metadata.memorax_code_workspace, "Codex-General");
+    assert.equal(requests[0].body.metadata.memorax_code_memory_scope, "general.v1");
+    assert.equal(requests[0].body.metadata.memorax_code_workspace, "General");
+    const nested = join(firstTask, "work");
+    await mkdir(nested);
+    const options = { cwd: nested, env: { ...env, CODEX_THREAD_ID: "session-projectless-1" }, fetchImpl };
+    const search = await runMemoryCli(["search", "--query", "general preference"], options);
+    const added = await runMemoryCli([
+      "add", "--memory", "Keep shared general preferences.", "--type", "preference", "--reason", "Explicit test save.",
+    ], options);
+    assert.equal(search.ok, true);
+    assert.equal(added.ok, true);
+    assert.equal(search.effectiveUserId, requests[0].body.user_id);
+    assert.equal(added.effectiveUserId, requests[0].body.user_id);
+    assert.deepEqual(requests.map(({ url }) => new URL(url).pathname), [
+      "/v1/memories/add", "/v1/memories/add", "/v1/memories/search", "/v1/memories/add",
+    ]);
+    assert.ok(requests.every(({ body }) => body.user_id === "user-1@General"));
+    assert.equal(requests[3].body.metadata.memorax_code_memory_scope, "general.v1");
   } finally {
     controller.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex binds a cwd-less General turn once before native writeback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-general-bind-"));
+  const workspace = join(root, "Documents", "Codex", "2026-09-09", "task");
+  const nested = join(workspace, "nested");
+  const other = join(root, "Documents", "Codex", "2026-09-09", "other");
+  const ordinary = join(root, "ordinary");
+  await Promise.all([nested, other, ordinary].map((path) => mkdir(path, { recursive: true })));
+  const { fetchImpl, requests } = memoraxAddFetch();
+  const env = {
+    ...WRITEBACK_ENV, HOME: root, USERPROFILE: root,
+    MEMORAX_CODE_HOME: join(root, "state"),
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
+  };
+  const controller = createCodexMemoryHookRuntime({ env, fetchImpl, memoraxCodeHome: env.MEMORAX_CODE_HOME });
+  try {
+    for (const [sessionId, cwd, accepted] of [["bind-default", workspace, true], ["reject-ordinary", ordinary, false]]) {
+      const transcriptPath = await writeRollout(root, sessionId, [
+        { turnId: "first", prompt: "Keep this general preference.", reply: "The preference is recorded." },
+        { turnId: "next", prompt: "Continue the same task.", reply: "The scope stays bound." },
+      ]);
+      await controller.recordTurnStart({
+        sessionId, turnId: "first", prompt: "Keep this general preference.",
+        workspaceKind: "projectless", transcriptPath,
+      });
+      const before = requests.length;
+      const completed = await controller.writeback({
+        sessionId, turnId: "first", cwd, transcriptPath,
+        lastAssistantMessage: "The preference is recorded.",
+      });
+      if (!accepted) {
+        assert.deepEqual(completed, { ok: true, scheduled: false, reason: "workspace_scope_mismatch" });
+        assert.equal(requests.length, before, "an ordinary cwd cannot inherit an unbound General hint");
+        continue;
+      }
+      assert.deepEqual(completed, { ok: true, scheduled: true });
+      await waitFor(() => requests.length === before + 1, "first cwd binding lost the current QA");
+      assert.equal(requests[before].body.user_id, "user-1@General");
+      assert.deepEqual(requests[before].body.messages.map(({ role, content, timestamp }) => ({ role, content, timestamp })), [
+        { role: "user", content: "Keep this general preference.", timestamp: Date.parse("2026-07-16T00:00:02.000Z") },
+        { role: "assistant", content: "The preference is recorded.", timestamp: Date.parse("2026-07-16T00:00:03.000Z") },
+      ]);
+      await controller.recordTurnStart({
+        sessionId, turnId: "next", prompt: "Continue the same task.", cwd: nested, transcriptPath,
+      });
+      assert.deepEqual(await controller.writeback({
+        sessionId, turnId: "next", cwd: nested, transcriptPath, lastAssistantMessage: "The scope stays bound.",
+      }), { ok: true, scheduled: true });
+      await waitFor(() => requests.length === before + 2, "bound General did not survive the next nested turn");
+      assert.equal(requests[before + 1].body.user_id, "user-1@General");
+      await controller.recordTurnStart({
+        sessionId, turnId: "next", prompt: "Continue the same task.",
+        cwd: other, workspaceKind: "projectless", transcriptPath,
+      });
+      assert.deepEqual(await controller.writeback({
+        sessionId, turnId: "next", cwd: other, transcriptPath, lastAssistantMessage: "The scope stays bound.",
+      }), { ok: true, scheduled: false, reason: "workspace_scope_mismatch" });
+      assert.equal(requests.length, before + 2, "an established General root cannot be replaced");
+    }
+  } finally {
+    controller.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex General recovery respects the native header and existing local bindings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-native-scope-"));
+  const workspace = join(root, "Documents", "Codex", "2026-09-08", "task");
+  const nested = join(workspace, "nested");
+  await mkdir(nested, { recursive: true });
+  const env = {
+    ...WRITEBACK_ENV,
+    HOME: root,
+    USERPROFILE: root,
+    MEMORAX_CODE_HOME: join(root, "state"),
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
+    MEMORAX_CODE_MEMORY_RETRIEVAL_ENABLED: "true",
+  };
+  const metadata = (id, cwd) => ({ type: "session_meta", payload: { id, cwd } });
+  const { fetchImpl, requests } = memoraxSearchFetch("Scoped test memory.");
+  try {
+    for (const [sessionId, records, initialKind] of [
+      ["wrong-session", [metadata("other-session", workspace)]],
+      ["imported-root", [metadata("imported-root", nested), metadata("imported-root", workspace)]],
+      ["invalid-header", [{ type: "turn_context", payload: {} }, metadata("invalid-header", workspace)]],
+      ["explicit-local", [metadata("explicit-local", workspace)], "local"],
+    ]) {
+      const transcriptPath = join(root, `${sessionId}.jsonl`);
+      await writeFile(transcriptPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+      const controller = createCodexMemoryHookRuntime({ env, fetchImpl, automaticWriteback: () => ({ accepted: true }) });
+      try {
+        if (initialKind) {
+          await controller.recordTurnStart({
+            sessionId, turnId: "first", prompt: "Keep the explicit folder scope.",
+            cwd: workspace, workspaceKind: initialKind, transcriptPath,
+          });
+        }
+        const result = await controller.recordTurnStart({
+          sessionId, turnId: "next", prompt: "Use only the authorized session scope.", cwd: nested, transcriptPath,
+        });
+        assert.match(result.additionalContext, /Scoped test memory/, sessionId);
+        assert.equal(requests.at(-1).body.user_id, `user-1@${initialKind ? "task" : "nested"}`, sessionId);
+      } finally {
+        controller.close();
+      }
+    }
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -650,7 +790,7 @@ test("memory hook restores exact projectless scope from current-turn state after
       transcriptPath,
     }), { ok: true, scheduled: true });
     await waitFor(() => requests.length === 1, "restarted Hook did not restore projectless scope");
-    assert.equal(requests[0].body.user_id, "user-1@Codex-General");
+    assert.equal(requests[0].body.user_id, "user-1@General");
     const current = JSON.parse(await readFile(
       tracePaths(memoraxCodeHome).sessionCurrentTurnPath("session-projectless-restart"), "utf8",
     ));
@@ -880,7 +1020,7 @@ test("memory hook writeback preserves projectless scope after turn metadata cach
       "Persisted prompt outlives metadata.",
       "Persisted reply outlives metadata.",
     ]);
-    assert.equal(requests[0].body.user_id, "user-1@Codex-General");
+    assert.equal(requests[0].body.user_id, "user-1@General");
   } finally {
     controller.close();
     await rm(root, { recursive: true, force: true });

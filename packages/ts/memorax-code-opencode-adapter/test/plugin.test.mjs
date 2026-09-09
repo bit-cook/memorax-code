@@ -40,6 +40,40 @@ test("chat.message retrieves memory and injects it into the system prompt", asyn
   });
 });
 
+test("default desktop workspace marks start and writeback projectless while Git and ordinary directories stay scoped", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-opencode-workspace-"));
+  try {
+    const defaultProject = join(root, "Documents", "Default Project");
+    await mkdir(join(defaultProject, "nested"), { recursive: true });
+    for (const fixture of [
+      { directory: defaultProject, project: {}, expected: "projectless" },
+      { directory: defaultProject, worktree: defaultProject, project: { vcs: "git" }, expected: "project" },
+      { directory: join(defaultProject, "nested"), project: {}, expected: "local" },
+    ]) {
+      const requests = [];
+      const messages = [
+        { info: { id: "user-default", role: "user", sessionID: "session-default" }, parts: [{ type: "text", text: "Prompt" }] },
+        { info: { id: "assistant-default", role: "assistant", sessionID: "session-default", parentID: "user-default", time: { completed: 123 }, finish: "stop" }, parts: [{ type: "text", text: "Reply" }] },
+      ];
+      const hooks = await createPluginWithoutReminders({
+        workspaceOptions: {
+          env: { HOME: root, USERPROFILE: root, XDG_CONFIG_HOME: join(root, "xdg"), SystemRoot: "C:\\Windows" },
+          execFile: () => `${join(root, "Documents")}\r\n`,
+        },
+        backendConnection: { url: "http://127.0.0.1:8787" },
+        fetchImpl: responseSequence(requests, [{ ok: true }, { ok: true }]),
+      })(pluginInput({ ...fixture, client: { session: { async messages() { return { data: messages }; } } } }));
+      await hooks["chat.message"]({ sessionID: "session-default" }, promptOutput("user-default", "Prompt"));
+      hooks.event(sessionIdleEvent("session-default"));
+      await hooks.dispose();
+      assert.deepEqual(requests.map((request) => request.body.workspaceKind), [fixture.expected, fixture.expected]);
+      assert.equal(requests[0].body.cwd, fixture.directory);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("chat.message does not accept a successful non-JSON Backend response", async () => {
   const requests = [];
   let messageReads = 0;
