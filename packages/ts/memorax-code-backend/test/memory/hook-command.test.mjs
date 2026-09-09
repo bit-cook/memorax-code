@@ -93,7 +93,7 @@ for (const commands of memoryHookCommands()) {
     for (const [operation, parse] of [["start", parseTurnStartCommand], ["writeback", parseWritebackCommand]]) {
       const command = commands[operation];
       assert.deepEqual(parse(command), { ok: true, command }, `${operation}: valid command`);
-      for (const [name, fields] of invalidFields[client][operation]) {
+      for (const [name, fields] of invalidFields[client === "workbuddy" ? "codebuddy" : client][operation]) {
         assert.deepEqual(parse({ ...command, ...fields }), INVALID, `${operation}: ${name}`);
       }
     }

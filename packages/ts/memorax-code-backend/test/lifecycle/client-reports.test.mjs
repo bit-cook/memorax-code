@@ -13,7 +13,8 @@ const clients = [
   { id: "claude", name: "Claude Code", reportKey: "claudeAdapter", skillKey: "claudeSkills" },
   { id: "dsh", name: "DSH", reportKey: "dshAdapter" },
   { id: "opencode", name: "OpenCode", reportKey: "opencodeAdapter", skillKey: "opencodeSkills" },
-  { id: "codebuddy", name: "CodeBuddy/WorkBuddy", reportKey: "codebuddyAdapter", skillKey: "codebuddySkills", hookKey: "codebuddyHooks" },
+  { id: "codebuddy", name: "CodeBuddy CLI", reportKey: "codebuddyAdapter", skillKey: "codebuddySkills", hookKey: "codebuddyHooks" },
+  { id: "workbuddy", name: "WorkBuddy", reportKey: "workbuddyAdapter", skillKey: "codebuddySkills", hookKey: "codebuddyHooks" },
   { id: "trae", name: "Trae", reportKey: "traeAdapter", skillKey: "traeSkills", hookKey: "traeHooks" },
 ];
 
@@ -34,7 +35,8 @@ test("lifecycle client catalog covers every Backend client without duplicate rep
   assert.equal(LIFECYCLE_CLIENTS.every(({ name }) => typeof name === "string" && name.length > 0), true);
   const entries = await readdir(new URL("../../src/clients/", import.meta.url), { withFileTypes: true });
   assert.deepEqual(
-    LIFECYCLE_CLIENTS.map(({ id }) => id).sort(),
+    // WorkBuddy shares the native CodeBuddy implementation, not its identity.
+    [...new Set(LIFECYCLE_CLIENTS.map(({ id }) => id === "workbuddy" ? "codebuddy" : id))].sort(),
     entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort(),
   );
 });

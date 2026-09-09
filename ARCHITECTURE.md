@@ -26,7 +26,7 @@ authoritative.
 ## 2. System Shape and Package Ownership
 
 MemoraX Code integrates Codex, Claude Code, DeepSeek Harness (DSH), OpenCode,
-CodeBuddy/WorkBuddy, and Trae with one local Backend. The Backend is a
+CodeBuddy CLI, WorkBuddy, and Trae with one local Backend. The Backend is a
 capability-oriented modular monolith. The clients retain ownership of models,
 model-provider credentials, native tools, model-provider traffic, and native
 transcript, message, or Hook-event creation.
@@ -45,7 +45,8 @@ flowchart LR
     Claude["Claude Code"]
     DSH["DeepSeek Harness"]
     OpenCode["OpenCode"]
-    CodeBuddy["CodeBuddy / WorkBuddy"]
+    CodeBuddy["CodeBuddy CLI"]
+    WorkBuddy["WorkBuddy"]
     Trae["Trae"]
   end
 
@@ -96,6 +97,7 @@ flowchart LR
   DSH --> DshAdapter
   OpenCode --> OpenCodeAdapter
   CodeBuddy --> CodeBuddyAdapter
+  WorkBuddy --> CodeBuddyAdapter
   Trae --> TraeAdapter
   CodexAdapter -. "versioned local Hook HTTP" .-> Service
   ClaudeAdapter -. "versioned local Hook HTTP" .-> Service
@@ -175,7 +177,17 @@ transcript-boundary and prompt-digest correlation as later turns. The plugin
 retains `SessionStart` and `Stop`; its old prompt dispatch is ignored to avoid
 duplicate handling during updates. The global entry honors native plugin
 disablement before Backend recovery, and lifecycle disable/remove cleans up
-only its owned Hook. The Trae adapter merges only marker-owned Global Hooks and
+only its owned Hook. CodeBuddy CLI and WorkBuddy share that implementation but
+use distinct `codebuddy` and `workbuddy` client identities. Setup discovers
+and selects them independently. Each installation retains its own configuration
+root, executable, Hook observations, and pending Turns; Backend session, trace,
+and writeback identities preserve the same separation. Shared native parsing
+keeps the original session ID for transcript validation. Legacy WorkBuddy
+selection is recognized from owned installation metadata, and explicit new
+client choices take precedence. Lifecycle cleanup never treats the other
+client's directory as stale installation data. Hook recovery preserves the
+active client selection and each installation's recorded root and command.
+The Trae adapter merges only marker-owned Global Hooks and
 materializes the shared Skill without changing provider settings. These
 implementations are loaded by their Backend lifecycle participants. Preserve
 the participant contract and each client's actual authority instead of forcing
@@ -445,7 +457,7 @@ Important distinctions:
   authentication is required when configuration or exposure mode demands it.
 - Client-specific runtimes interpret native formats. Client-neutral memory
   coordination does not parse, mix, or guess those formats.
-- All six clients delegate their common memory lifecycle
+- All supported clients delegate their common memory lifecycle
   to `memory/harness-runtime.ts`. Turn start resolves repository scope, records
   Turn metadata and current-turn trace state, performs optional retrieval,
   claims supported quota notices, and returns normalized context. Completion passes
@@ -623,7 +635,7 @@ content stops locally; accepted duplicates need not issue another Add request.
 ### 3.5 Repo Memory coordination
 
 Repo Memory is repository-local guidance under `.repo_memory`, not a MemoraX
-provider response. In all six clients, an accepted turn-start result exposes a
+provider response. In all supported clients, an accepted turn-start result exposes a
 worktree to the adapter integration only for a verified Git scope. Codex,
 Claude Code, and CodeBuddy/WorkBuddy Hooks, DSH's native pre-step integration,
 and OpenCode's awaited `chat.message` handler may schedule a missing bundle
@@ -735,7 +747,7 @@ entrypoints and compatibility facades. It is not another implementation area.
 | `src/lifecycle/backend` | Managed process, PID/token/connection records, status probing, cleanup, and shutdown requests | Helper contracts do not depend back on the full service implementation |
 | `src/clients/<client>` | Native interpretation, correlation, interruption/recovery, trace adaptation, and lifecycle participation; delegates common memory workflows to the shared harness runtime | Request runtime stays HTTP-composition independent and uses only the matching [native authority](#native-writeback-authority); native deployment follows [package ownership](#22-physical-dependency-directions) |
 | `src/memory` | Memory commands, retrieval, writeback, turn coordination, repository session pinning, manual CLI, and buffering/chunking | Client-neutral modules do not parse native transcript formats |
-| `src/memory/harness-runtime.ts` | Common Turn-start and materialized-completion workflows for all six clients; publishes registered Turn state synchronously and owns locally created memory resources while reusing injected shared resources | No client implementation, HTTP, app/lifecycle, or direct provider-transport imports; diagnostics enter through a port and native interpretation stays with each client |
+| `src/memory/harness-runtime.ts` | Common Turn-start and materialized-completion workflows for all supported clients; publishes registered Turn state synchronously and owns locally created memory resources while reusing injected shared resources | No client implementation, HTTP, app/lifecycle, or direct provider-transport imports; diagnostics enter through a port and native interpretation stays with each client |
 | `src/personal-memory` | Local User Profile listing, normalization, duplicate detection, updates, deletion, and atomic storage | No Backend service, provider calls, transcript processing, or Procedure Memory mutation |
 | `src/repo-memory` | Repo Memory preparation, local and provider facet collection, delta detection, and bundle validation | Prepares bundle directories and the repository ignore entry, collects raw evidence, and validates output; agents author durable Markdown memory |
 | `src/repository` | Read-only repository identity | Scope derivation does not execute Git or use synchronous filesystem reads |

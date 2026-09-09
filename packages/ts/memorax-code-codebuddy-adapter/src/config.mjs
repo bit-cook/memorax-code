@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { chmod, cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep, win32 } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveHookCodeBuddyCommand } from "../../memorax-code-adapter-common/src/clients/codebuddy-command.mjs";
+import { codeBuddyMetadataClient, defaultCodeBuddyHome, defaultWorkBuddyHome, readCodeBuddyPackageMetadata, resolveHookCodeBuddyCommand } from "../../memorax-code-adapter-common/src/clients/codebuddy-command.mjs";
+import { readJsonRuntimeRecord, writePrivateJsonRecord } from "../../memorax-code-adapter-common/src/runtime-record.mjs";
 import { withJsonFileLockAsync } from "../../memorax-code-adapter-common/src/config-utils.mjs";
 import {
   codeBuddyHookManifestConfigured,
@@ -24,21 +25,7 @@ const PLUGIN_NAME = "memorax-code-codebuddy-adapter";
 const MARKETPLACE_NAME = "memorax-code-local";
 const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
 
-export function defaultCodeBuddyHome(
-  env = process.env,
-  homeDir = homedir(),
-  platform = process.platform,
-  pathExists = existsSync,
-) {
-  const configured = env.CODEBUDDY_HOME?.trim() || env.WORKBUDDY_HOME?.trim();
-  if (configured) return configured;
-  if (platform !== "win32") return join(homeDir, ".workbuddy");
-  const workBuddyHome = win32.join(homeDir, ".workbuddy");
-  const legacyCodeBuddyHome = win32.join(homeDir, ".codebuddy");
-  return pathExists(workBuddyHome) || !pathExists(legacyCodeBuddyHome)
-    ? workBuddyHome
-    : legacyCodeBuddyHome;
-}
+export { defaultCodeBuddyHome, defaultWorkBuddyHome };
 // CodeBuddy stores installed plugin caches under the marketplace namespace.
 export function codeBuddyInstallPath(home = defaultCodeBuddyHome()) { return join(home, "plugins", "cache", MARKETPLACE_NAME, PLUGIN_NAME, VERSION); }
 export function installedRegistryPath(home = defaultCodeBuddyHome()) { return join(home, "plugins", "installed_plugins.json"); }
@@ -47,29 +34,157 @@ export function knownMarketplacesPath(home = defaultCodeBuddyHome()) { return jo
 export function marketplaceRoot(home = defaultCodeBuddyHome()) { return join(home, "plugins", "marketplaces", MARKETPLACE_NAME); }
 export function marketplacePluginPath(home = defaultCodeBuddyHome()) { return join(marketplaceRoot(home), "plugins", PLUGIN_NAME); }
 
-export async function enableCodeBuddyAdapter(options = {}) {
-  const home = options.codeBuddyHome ?? defaultCodeBuddyHome();
+export function enableCodeBuddyAdapter(options = {}) { return withManagedTargetLock(options, () => enableAdapter(options)); }
+export function disableCodeBuddyAdapter(options = {}) { return withManagedTargetLock(options, () => disableAdapter(options)); }
+export function removeCodeBuddyPluginInstallation(options = {}) { return withManagedTargetLock(options, () => removeAdapter(options)); }
+
+export async function readManagedCodeBuddyTarget(options = {}) {
+  const client = selectedClient(options);
+  const path = managedTargetPath(options);
+  const state = readJsonRuntimeRecord(path);
+  if (state.status === "invalid") throw new Error(`invalid ${client} installation record: ${path}`);
+  if (state.status === "present") {
+    const value = state.value;
+    if (value.version !== 1 || value.client !== client || !stringValue(value.codeBuddyHome)
+      || !stringValue(value.codeBuddyCommand)
+      || (value.legacyClientAlias !== undefined && value.legacyClientAlias !== true)) throw new Error(`invalid ${client} installation record: ${path}`);
+    if (!options.codeBuddyHome || comparablePath(resolve(options.codeBuddyHome), options.platform ?? process.platform)
+      === comparablePath(value.codeBuddyHome, options.platform ?? process.platform)) return value;
+  }
+  const homes = options.codeBuddyHome ? [resolve(options.codeBuddyHome)] : [
+    defaultClientHome(client, options),
+    ...(client === "workbuddy" ? [defaultClientHome("codebuddy", options)] : []),
+  ];
+  for (const home of new Set(homes)) {
+    for (const root of [marketplacePluginPath(home), codeBuddyInstallPath(home)]) {
+      const metadata = readCodeBuddyPackageMetadata(root);
+      if (codeBuddyMetadataClient(metadata, options) !== client || !stringValue(metadata?.codeBuddyCommand)) continue;
+      if (metadata.codeBuddyHome && comparablePath(metadata.codeBuddyHome, options.platform ?? process.platform)
+        !== comparablePath(home, options.platform ?? process.platform)) continue;
+      return { version: 1, client, codeBuddyHome: home, codeBuddyCommand: metadata.codeBuddyCommand,
+        ...(client === "workbuddy" && metadata.client === undefined ? { legacyClientAlias: true } : {}),
+      };
+    }
+  }
+  return undefined;
+}
+
+export async function resolveCodeBuddyClientSelection(clients, options = {}) {
+  if (clients?.workbuddy !== undefined || clients?.codebuddy !== true) return clients;
+  const workBuddyOptions = { ...options, client: "workbuddy", codeBuddyHome: options.workBuddyHome };
+  const target = await readManagedCodeBuddyTarget(workBuddyOptions);
+  const candidates = new Set([
+    target?.codeBuddyHome,
+    options.workBuddyHome ?? defaultClientHome("workbuddy", options),
+    options.codeBuddyHome ?? defaultClientHome("codebuddy", options),
+  ].filter(Boolean));
+  let legacyHome = target?.legacyClientAlias ? target.codeBuddyHome : undefined;
+  for (const home of candidates) {
+    if (legacyHome) break;
+    for (const root of [marketplacePluginPath(home), codeBuddyInstallPath(home)]) {
+      const metadata = readCodeBuddyPackageMetadata(root);
+      if (metadata?.client !== undefined || codeBuddyMetadataClient(metadata, options) !== "workbuddy") continue;
+      if (metadata.codeBuddyHome && comparablePath(metadata.codeBuddyHome, options.platform ?? process.platform)
+        !== comparablePath(home, options.platform ?? process.platform)) continue;
+      legacyHome = home;
+      break;
+    }
+    if (legacyHome) break;
+  }
+  if (!legacyHome) return clients;
+  const platform = options.platform ?? process.platform;
+  const legacyCodeBuddyHome = options.codeBuddyHome
+    && comparablePath(resolve(options.codeBuddyHome), platform) === comparablePath(resolve(legacyHome), platform);
+  const cli = await readManagedCodeBuddyTarget({
+    ...options, client: "codebuddy", codeBuddyHome: legacyCodeBuddyHome ? undefined : options.codeBuddyHome,
+  });
+  return { ...clients, workbuddy: true, codebuddy: Boolean(cli
+    && comparablePath(cli.codeBuddyHome, platform) !== comparablePath(resolve(legacyHome), platform)) };
+}
+
+async function resolveTarget(options) {
+  const client = selectedClient(options);
+  const retained = await readManagedCodeBuddyTarget(options);
+  const home = resolve(options.codeBuddyHome ?? retained?.codeBuddyHome ?? defaultClientHome(client, options));
+  for (const root of [marketplacePluginPath(home), codeBuddyInstallPath(home)]) {
+    const metadataPath = join(root, ".memorax-code-package.json");
+    const metadata = readCodeBuddyPackageMetadata(root);
+    if (existsSync(metadataPath) && (!metadata || (metadata.client !== undefined && !codeBuddyMetadataClient(metadata, options)))) {
+      throw new Error(`invalid adapter installation metadata: ${metadataPath}`);
+    }
+    if (metadata?.codeBuddyHome && comparablePath(metadata.codeBuddyHome, options.platform ?? process.platform)
+      !== comparablePath(home, options.platform ?? process.platform)) throw new Error(`conflicting adapter installation home: ${metadataPath}`);
+  }
+  const otherClient = client === "codebuddy" ? "workbuddy" : "codebuddy";
+  const other = await readManagedCodeBuddyTarget({ ...options, client: otherClient, codeBuddyHome: home });
+  const ownRecord = readJsonRuntimeRecord(managedTargetPath(options)).value;
+  if (other && ownRecord && comparablePath(ownRecord.codeBuddyHome, options.platform ?? process.platform)
+    === comparablePath(home, options.platform ?? process.platform)) {
+    throw new Error(`conflicting ${client} installation record: ${home} is also managed for ${otherClient}`);
+  }
+  return {
+    ...(other ? { ownedByOtherClient: otherClient } : {}),
+    client,
+    codeBuddyHome: home,
+    codeBuddyCommand: stringValue(options.codeBuddyCommand) ?? retained?.codeBuddyCommand,
+    ...(retained?.legacyClientAlias ? { legacyClientAlias: true } : {}),
+  };
+}
+
+function selectedClient(options) {
+  const client = options.client ?? "codebuddy";
+  if (client !== "codebuddy" && client !== "workbuddy") throw new Error("invalid CodeBuddy adapter client");
+  return client;
+}
+
+function defaultClientHome(client, options) {
+  return (client === "workbuddy" ? defaultWorkBuddyHome : defaultCodeBuddyHome)(process.env, homedir(), options.platform ?? process.platform);
+}
+
+function managedTargetPath(options) {
+  return join(options.memoraxCodeHome ?? defaultMemoraxCodeHome(), "adapters", selectedClient(options), "installation.json");
+}
+
+async function withManagedTargetLock(options, operation) {
+  selectedClient(options);
+  const path = join(options.memoraxCodeHome ?? defaultMemoraxCodeHome(), "adapters", "codebuddy-installations.json");
+  return withJsonFileLockAsync(path, operation);
+}
+
+async function writeManagedTarget(options, value) {
+  const path = managedTargetPath(options);
+  writePrivateJsonRecord(path, value, { durableBoundary: dirname(path) });
+}
+
+function stringValue(value) { return typeof value === "string" && value.trim() ? value.trim() : undefined; }
+
+async function enableAdapter(options) {
+  const target = await resolveTarget(options);
+  const { client, codeBuddyHome: home } = target;
+  if (target.ownedByOtherClient) throw new Error(`${home} is managed for ${target.ownedByOtherClient}, not ${client}`);
+  const codeBuddyCommand = target.codeBuddyCommand ?? resolveHookCodeBuddyCommand({ client });
   const platform = options.platform ?? process.platform;
   const memoraxCodeHome = options.memoraxCodeHome ?? defaultMemoraxCodeHome();
   const installPath = options.installPath ?? codeBuddyInstallPath(home);
   const localPluginPath = marketplacePluginPath(home);
+  await writeManagedTarget(options, { version: 1, ...target, codeBuddyCommand });
   // Installation alone cannot prove native Hook execution; require a fresh
   // runtime observation instead of carrying one over from the previous install.
-  await rm(codeBuddyRuntimeObservationPath(memoraxCodeHome), { force: true });
+  await rm(codeBuddyRuntimeObservationPath(memoraxCodeHome, client), { force: true });
   await mkdir(dirname(installPath), { recursive: true });
   await rm(installPath, { recursive: true, force: true });
   await rm(legacyCodeBuddyInstallPath(home), { recursive: true, force: true });
   await cp(ROOT, installPath, { recursive: true, force: true, filter: packageCopyFilter(ROOT) });
   await materializeCommonRuntime(installPath);
   await materializeCodeBuddyHookManifest(installPath, platform);
-  await writePackageMetadata(installPath, options.codeBuddyCommand, home, options.memoraxCodeCommand);
+  await writePackageMetadata(installPath, codeBuddyCommand, home, options.memoraxCodeCommand, client);
   await materializeCanonicalSkill(installPath);
   await mkdir(dirname(localPluginPath), { recursive: true });
   await rm(localPluginPath, { recursive: true, force: true });
   await cp(ROOT, localPluginPath, { recursive: true, force: true, filter: packageCopyFilter(ROOT) });
   await materializeCommonRuntime(localPluginPath);
   await materializeCodeBuddyHookManifest(localPluginPath, platform);
-  await writePackageMetadata(localPluginPath, options.codeBuddyCommand, home, options.memoraxCodeCommand);
+  await writePackageMetadata(localPluginPath, codeBuddyCommand, home, options.memoraxCodeCommand, client);
   await materializeCanonicalSkill(localPluginPath);
   await writeMarketplaceManifest(home);
   await updateKnownMarketplace(home, true);
@@ -79,57 +194,52 @@ export async function enableCodeBuddyAdapter(options = {}) {
     updateCodeBuddyUserPromptHook(settings, codeBuddyUserPromptHookCommand(localPluginPath, platform));
   });
   await updateLegacyRegistry(home, { installPath, enabled: true });
-  await removeLegacyManagedInstallation(home, platform);
-  return { ok: true, action: "enable", runtime: "codebuddy", integration: "hooks", installed: true, enabled: true, codeBuddyHome: home, installPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID, marketplacePath: localPluginPath, codebuddyHooks: { ok: true, configured: true, runtimeObserved: false, status: "unverified" }, codebuddySkills: { ok: true, status: "installed", managed: true, memoraxCode: true, path: join(localPluginPath, "skills", "memorax-code", "SKILL.md") } };
+  return { ok: true, action: "enable", runtime: client, integration: "hooks", installed: true, enabled: true, codeBuddyHome: home, installPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID, marketplacePath: localPluginPath, codebuddyHooks: { ok: true, configured: true, runtimeObserved: false, status: "unverified" }, codebuddySkills: { ok: true, status: "installed", managed: true, memoraxCode: true, path: join(localPluginPath, "skills", "memorax-code", "SKILL.md") } };
 }
 
-export async function disableCodeBuddyAdapter(options = {}) {
-  const home = options.codeBuddyHome ?? defaultCodeBuddyHome();
-  const platform = options.platform ?? process.platform;
+async function disableAdapter(options) {
+  const { client, codeBuddyHome: home, ownedByOtherClient } = await resolveTarget(options);
   const registryPath = installedRegistryPath(home);
-  const legacyHome = legacyCodeBuddyHome(home, platform);
-  const installed = await managedCodeBuddyInstallationExists(home);
-  const legacyInstalled = legacyHome ? await managedCodeBuddyInstallationExists(legacyHome) : false;
-  if (!installed && !legacyInstalled) return { ok: true, action: "disable", runtime: "codebuddy", installed: false, enabled: false, codeBuddyHome: home, statePath: registryPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID };
+  const installed = !ownedByOtherClient && await managedCodeBuddyInstallationExists(home);
+  if (!installed) return { ok: true, action: "disable", runtime: client, installed: false, enabled: false, codeBuddyHome: home, statePath: registryPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID };
   if (installed) await disableManagedCodeBuddyInstallation(home);
-  if (legacyInstalled) await disableManagedCodeBuddyInstallation(legacyHome);
-  return { ok: true, action: "disable", runtime: "codebuddy", installed: true, enabled: false, codeBuddyHome: home, statePath: registryPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID, legacyCodeBuddyHome: legacyInstalled ? legacyHome : undefined, legacyManaged: legacyInstalled };
+  return { ok: true, action: "disable", runtime: client, installed: true, enabled: false, codeBuddyHome: home, statePath: registryPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID };
 }
 
 export async function readCodeBuddyAdapterStatus(options = {}) {
-  const home = options.codeBuddyHome ?? defaultCodeBuddyHome();
+  const { client, codeBuddyHome: home, ownedByOtherClient } = await resolveTarget(options);
   const platform = options.platform ?? process.platform;
   const memoraxCodeHome = options.memoraxCodeHome ?? defaultMemoraxCodeHome();
   const installPath = codeBuddyInstallPath(home);
   const localPluginPath = marketplacePluginPath(home);
-  const settings = await readJsonRecord(codeBuddySettingsPath(home));
-  const known = await readJsonRecord(knownMarketplacesPath(home));
+  const nativeHomeAvailable = !ownedByOtherClient && await nativeHomeIsDirectory(home);
+  const settings = !nativeHomeAvailable ? {} : await readJsonRecord(codeBuddySettingsPath(home));
+  const known = !nativeHomeAvailable ? {} : await readJsonRecord(knownMarketplacesPath(home));
   const installedRoots = [];
   for (const root of [localPluginPath, installPath]) {
-    if (await pathExists(root)) installedRoots.push(root);
+    if (!ownedByOtherClient && await pathExists(root)) installedRoots.push(root);
   }
   const installed = installedRoots.length > 0;
   const skillPath = join(localPluginPath, "skills", "memorax-code", "SKILL.md");
-  const skillInstalled = await pathExists(skillPath);
+  const skillInstalled = !ownedByOtherClient && await pathExists(skillPath);
   const enabled = settings.enabledPlugins?.[PLUGIN_ID] === true;
   const marketplaceReady = Boolean(known[MARKETPLACE_NAME]);
-  const legacyHome = legacyCodeBuddyHome(home, platform);
-  const legacyManaged = legacyHome ? await managedCodeBuddyInstallationExists(legacyHome) : false;
   const hookConfigured = installedRoots.length > 0
     && (await Promise.all(installedRoots.map((root) => codeBuddyHookManifestConfigured(root, platform)))).every(Boolean)
     && codeBuddyUserPromptHookConfigured(settings, codeBuddyUserPromptHookCommand(localPluginPath, platform), enabled);
-  const observation = await readCodeBuddyRuntimeObservation(memoraxCodeHome);
+  const observation = await readCodeBuddyRuntimeObservation(memoraxCodeHome, client);
   const runtimeObserved = hookConfigured && observationMatches(observation, home, platform);
-  return { ok: true, action: "status", runtime: "codebuddy", integration: "hooks", installed, enabled, managed: installed && marketplaceReady, codeBuddyHome: home, installPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID, marketplaceReady, legacyCodeBuddyHome: legacyManaged ? legacyHome : undefined, legacyManaged, codebuddyHooks: { ok: hookConfigured, configured: hookConfigured, runtimeObserved, status: hookConfigured ? (runtimeObserved ? "observed" : "unverified") : "invalid", observationPath: codeBuddyRuntimeObservationPath(memoraxCodeHome) }, codebuddySkills: { ok: skillInstalled, status: skillInstalled ? "installed" : "missing", managed: skillInstalled, memoraxCode: skillInstalled, path: skillPath } };
+  return { ok: true, action: "status", runtime: client, integration: "hooks", installed, enabled, managed: installed && marketplaceReady, codeBuddyHome: home, installPath, marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID, marketplaceReady, codebuddyHooks: { ok: hookConfigured, configured: hookConfigured, runtimeObserved, status: hookConfigured ? (runtimeObserved ? "observed" : "unverified") : "invalid", observationPath: codeBuddyRuntimeObservationPath(memoraxCodeHome, client) }, codebuddySkills: { ok: skillInstalled, status: skillInstalled ? "installed" : "missing", managed: skillInstalled, memoraxCode: skillInstalled, path: skillPath } };
 }
 
-export async function removeCodeBuddyPluginInstallation(options = {}) {
-  const home = options.codeBuddyHome ?? defaultCodeBuddyHome();
+async function removeAdapter(options) {
+  const { client, codeBuddyHome: home, ownedByOtherClient } = await resolveTarget(options);
+  const removed = !ownedByOtherClient && await removeManagedCodeBuddyInstallation(home);
+  const retained = await readManagedCodeBuddyTarget({ ...options, codeBuddyHome: undefined });
   const platform = options.platform ?? process.platform;
-  const legacyHome = legacyCodeBuddyHome(home, platform);
-  const removed = await removeManagedCodeBuddyInstallation(home);
-  const legacyRemoved = legacyHome ? await removeManagedCodeBuddyInstallation(legacyHome) : false;
-  return { ok: true, action: "codebuddy-plugin-remove", runtime: "codebuddy", installed: false, enabled: false, removed: removed || legacyRemoved, codeBuddyHome: home, statePath: installedRegistryPath(home), marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID };
+  if (!ownedByOtherClient && retained
+    && comparablePath(retained.codeBuddyHome, platform) === comparablePath(home, platform)) await rm(managedTargetPath(options), { force: true });
+  return { ok: true, action: `${client}-plugin-remove`, runtime: client, installed: false, enabled: false, removed, codeBuddyHome: home, statePath: installedRegistryPath(home), marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID };
 }
 
 async function disableManagedCodeBuddyInstallation(home) {
@@ -139,11 +249,6 @@ async function disableManagedCodeBuddyInstallation(home) {
     updateCodeBuddyUserPromptHook(settings);
   });
   await updateLegacyRegistry(home, { installPath: codeBuddyInstallPath(home), enabled: false });
-}
-
-async function removeLegacyManagedInstallation(home, platform) {
-  const legacyHome = legacyCodeBuddyHome(home, platform);
-  return legacyHome ? await removeManagedCodeBuddyInstallation(legacyHome) : false;
 }
 
 async function removeManagedCodeBuddyInstallation(home) {
@@ -168,6 +273,7 @@ async function removeManagedCodeBuddyInstallation(home) {
 }
 
 async function managedCodeBuddyInstallationExists(home) {
+  if (!await nativeHomeIsDirectory(home)) return false;
   if (await pathExists(marketplaceRoot(home))
     || await pathExists(codeBuddyPluginCacheRoot(home))
     || await pathExists(legacyCodeBuddyPluginCacheRoot(home))) return true;
@@ -180,10 +286,12 @@ async function managedCodeBuddyInstallationExists(home) {
     || Object.hasOwn(recordValue(registry.plugins), PLUGIN_ID);
 }
 
-function legacyCodeBuddyHome(home, platform) {
-  return platform === "win32" && basename(home).toLowerCase() === ".workbuddy"
-    ? join(dirname(home), ".codebuddy")
-    : undefined;
+async function nativeHomeIsDirectory(home) {
+  try { return (await stat(home)).isDirectory(); }
+  catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 async function readRegistry(home) {
@@ -301,15 +409,16 @@ async function materializeCanonicalSkill(destination) {
   await cp(source, target, { recursive: true, force: true });
 }
 
-async function writePackageMetadata(destination, configuredCommand, codeBuddyHome, configuredMemoraxCodeCommand) {
+async function writePackageMetadata(destination, configuredCommand, codeBuddyHome, configuredMemoraxCodeCommand, client) {
   const codeBuddyCommand = typeof configuredCommand === "string" && configuredCommand.trim()
     ? configuredCommand.trim()
-    : resolveHookCodeBuddyCommand();
+    : resolveHookCodeBuddyCommand({ client });
   const memoraxCodeCommand = typeof configuredMemoraxCodeCommand === "string" && configuredMemoraxCodeCommand.trim()
     ? configuredMemoraxCodeCommand.trim()
     : defaultMemoraxCodeCommand();
   await writeJsonFile(join(destination, ".memorax-code-package.json"), {
     version: 1,
+    client,
     codeBuddyCommand,
     codeBuddyHome,
     ...(memoraxCodeCommand ? { memoraxCodeCommand } : {}),

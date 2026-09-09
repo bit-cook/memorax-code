@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import { appendFile, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +12,7 @@ import { writeCodeBuddyRuntimeObservation } from "../src/runtime-observation.mjs
 
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const commonRoot = resolveCommonSourceRoot(pluginRoot);
+const { codeBuddyMetadataClient, defaultCodeBuddyHome, defaultWorkBuddyHome, readCodeBuddyPackageMetadata } = await import(pathToFileURL(join(commonRoot, "clients", "codebuddy-command.mjs")).href);
 const { scheduleMissingRepoMemoryBuild } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-memory-auto-build.mjs")).href);
 const { isRepoMemoryJobWorker } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-memory-job-context.mjs")).href);
 const { buildRepoProcedureMemoryContext } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-procedure-memory-context.mjs")).href);
@@ -39,13 +39,12 @@ const sessionId = stringValue(input?.session_id) ?? stringValue(input?.sessionId
 const transcriptPath = stringValue(input?.transcript_path) ?? stringValue(input?.transcriptPath);
 if (!event || !sessionId || !transcriptPath) process.exit(0);
 const home = process.env.MEMORAX_CODE_HOME?.trim() || join(homedir(), ".memorax-code");
-const packageMetadata = await readRecord(join(pluginRoot, ".memorax-code-package.json"));
-const codeBuddyHome = commonStringValue(process.env.CODEBUDDY_HOME)
-  ?? commonStringValue(process.env.WORKBUDDY_HOME)
-  ?? commonStringValue(packageMetadata.codeBuddyHome)
-  ?? commonStringValue(input?.codebuddy_home)
-  ?? commonStringValue(input?.codeBuddyHome)
-  ?? defaultCodeBuddyHome();
+const packageMetadata = readCodeBuddyPackageMetadata(pluginRoot);
+const client = codeBuddyMetadataClient(packageMetadata);
+// Shared Hook code needs installation authority before touching either client's state.
+if (!client) process.exit(0);
+const codeBuddyHome = commonStringValue(packageMetadata.codeBuddyHome)
+  ?? (client === "workbuddy" ? defaultWorkBuddyHome() : defaultCodeBuddyHome());
 const managedPrompt = process.argv[2] === "managed-user-prompt";
 // Global prompt Hooks load before plugins on cold startup. Honor native plugin
 // disablement before observation or Backend recovery, and ignore old manifest
@@ -58,24 +57,24 @@ if (managedPrompt) {
   process.exit(0);
 }
 try {
-  await writeCodeBuddyRuntimeObservation({ memoraxCodeHome: home, codeBuddyHome, pluginRoot });
+  await writeCodeBuddyRuntimeObservation({ memoraxCodeHome: home, codeBuddyHome, pluginRoot, client });
 } catch (error) {
   if (process.env.MEMORAX_CODE_CODEBUDDY_HOOK_DEBUG === "1") {
     console.error(error instanceof Error ? error.message : String(error));
   }
 }
-const pendingPath = join(home, "adapters", "codebuddy", "pending.json");
+const pendingPath = join(home, "adapters", client, "pending.json");
 const reminderOptions = {
-  adapterDir: "codebuddy",
+  adapterDir: client,
   debugEnv: "MEMORAX_CODE_CODEBUDDY_HOOK_DEBUG",
   memoraxCodeHome: home,
-  runtime: "codebuddy",
+  runtime: client,
   supplementalReminderAfterCompact: true,
 };
 const personalMemoryContextOptions = {
-  adapterDir: "codebuddy",
+  adapterDir: client,
   debugEnv: "MEMORAX_CODE_CODEBUDDY_HOOK_DEBUG",
-  sessionKeyPrefix: "codebuddy",
+  sessionKeyPrefix: client,
 };
 if (event === "SessionStart") await bindMemoryCliTraceSession(sessionId);
 await ensureBackendAvailable({
@@ -93,7 +92,7 @@ await ensureBackendAvailable({
   buildStartArgs: (homes, recoveryArguments) => [
     "start",
     "--home", homes.memoraxCodeHome,
-    "--codebuddy-home", homes.codeBuddyHome,
+    client === "workbuddy" ? "--workbuddy-home" : "--codebuddy-home", homes.codeBuddyHome,
     ...recoveryArguments,
   ],
   debug: (message) => { if (process.env.MEMORAX_CODE_CODEBUDDY_HOOK_DEBUG === "1") console.error(message); },
@@ -105,7 +104,8 @@ if (event === "SessionStart") {
   if (!prompt) process.exit(0);
   const boundary = await fileBoundary(transcriptPath);
   const turnId = provisionalTurnId(sessionId, boundary, prompt);
-  const workspaceKind = resolveWorkBuddyWorkspaceKind(input);
+  const workspaceKind = client === "workbuddy" ? resolveWorkBuddyWorkspaceKind(input)
+    : stringValue(input.workspace_kind) ?? stringValue(input.workspaceKind);
   await updatePending(pendingPath, (state) => {
     const now = Date.now();
     const existing = state[sessionId];
@@ -119,7 +119,7 @@ if (event === "SessionStart") {
       updatedAt: now,
     };
   });
-  const response = await post("/memory/turn-start", { version: 1, client: "codebuddy", sessionId, turnId, transcriptPath, prompt, cwd: stringValue(input.cwd), workspaceKind });
+  const response = await post("/memory/turn-start", { version: 1, client, sessionId, turnId, transcriptPath, prompt, cwd: stringValue(input.cwd), workspaceKind });
   const repoMemoryWorktree = stringValue(response?.repoMemoryWorktree);
   scheduleMissingRepoMemoryBuild(repoMemoryWorktree, {
     debugEnv: "MEMORAX_CODE_CODEBUDDY_HOOK_DEBUG",
@@ -156,7 +156,7 @@ if (event === "SessionStart") {
 } else if (event === "Stop") {
   const record = (await readPending(pendingPath))[sessionId];
   if (!record || record.transcriptPath !== transcriptPath) process.exit(0);
-  const response = await post("/memory/writeback", { version: 1, client: "codebuddy", sessionId, turnId: record.turnId, transcriptPath, cwd: record.cwd ?? stringValue(input.cwd), workspaceKind: record.workspaceKind ?? stringValue(input.workspaceKind) });
+  const response = await post("/memory/writeback", { version: 1, client, sessionId, turnId: record.turnId, transcriptPath, cwd: record.cwd ?? stringValue(input.cwd), workspaceKind: record.workspaceKind ?? stringValue(input.workspaceKind) });
   // Retain pending state until Backend enqueue acceptance. A new turn may have
   // replaced it during the request, so cleanup must still match the submitted turn.
   if (response?.ok === true && response?.scheduled === true) {
@@ -170,7 +170,7 @@ async function recordReminder(reminder) {
   if (!reminder.turnId || !reminder.transcriptPath) return;
   await post("/memory/skill-reminder", {
     version: 1,
-    client: "codebuddy",
+    client,
     sessionId: reminder.sessionId,
     turnId: reminder.turnId,
     transcriptPath: reminder.transcriptPath,
@@ -204,7 +204,7 @@ async function bindMemoryCliTraceSession(sessionId) {
   if (!envFile) return;
   try {
     await appendFile(envFile, [
-      "export MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT='codebuddy'",
+      `export MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT=${shellSingleQuote(client)}`,
       `export MEMORAX_CODE_MEMORY_CLI_TRACE_SESSION_ID=${shellSingleQuote(sessionId)}`,
       "",
     ].join("\n"), "utf8");
@@ -216,15 +216,6 @@ async function bindMemoryCliTraceSession(sessionId) {
 }
 function shellSingleQuote(value) { return `'${value.replaceAll("'", "'\"'\"'")}'`; }
 function stringValue(value) { return typeof value === "string" && value.trim() ? value.trim() : undefined; }
-
-function defaultCodeBuddyHome() {
-  const workBuddyHome = join(homedir(), ".workbuddy");
-  if (process.platform !== "win32") return workBuddyHome;
-  const legacyCodeBuddyHome = join(homedir(), ".codebuddy");
-  return existsSync(workBuddyHome) || !existsSync(legacyCodeBuddyHome)
-    ? workBuddyHome
-    : legacyCodeBuddyHome;
-}
 
 function provisionalTurnId(sessionId, boundary, prompt) {
   return `${sessionId}:${boundary}:${createHash("sha256").update(prompt.trim()).digest("hex")}`;

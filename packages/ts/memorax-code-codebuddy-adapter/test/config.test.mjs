@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join, win32 } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   defaultCodeBuddyHome,
+  defaultWorkBuddyHome,
+  readManagedCodeBuddyTarget,
+  resolveCodeBuddyClientSelection,
   disableCodeBuddyAdapter,
   enableCodeBuddyAdapter,
   knownMarketplacesPath,
@@ -20,33 +23,20 @@ import { codeBuddyHookCommand, codeBuddyUserPromptHookCommand } from "../src/hoo
 import { writeCodeBuddyRuntimeObservation } from "../src/runtime-observation.mjs";
 import { resolveHookCodeBuddyCommand } from "../../memorax-code-adapter-common/src/clients/codebuddy-command.mjs";
 
-test("prefers the WorkBuddy home on Windows while preserving a legacy CodeBuddy home", () => {
-  assert.equal(
-    defaultCodeBuddyHome({}, "C:\\Users\\tester", "win32", () => false),
-    "C:\\Users\\tester\\.workbuddy",
-  );
-  assert.equal(
-    defaultCodeBuddyHome(
-      {},
-      "C:\\Users\\tester",
-      "win32",
-      (path) => path.endsWith("\\.codebuddy"),
-    ),
-    "C:\\Users\\tester\\.codebuddy",
-  );
-  assert.equal(
-    defaultCodeBuddyHome({}, "C:\\Users\\tester", "win32", () => true),
-    "C:\\Users\\tester\\.workbuddy",
-  );
-  assert.equal(
-    defaultCodeBuddyHome(
-      { WORKBUDDY_HOME: "D:\\WorkBuddyData" },
-      "C:\\Users\\tester",
-      "win32",
-      () => false,
-    ),
-    "D:\\WorkBuddyData",
-  );
+test("selects independent native homes and command overrides", () => {
+  for (const [platform, home, pathJoin] of [[process.platform, join(tmpdir(), "buddy-discovery-home"), join], ["win32", "C:\\Users\\tester", win32.join]]) {
+    const cliHome = pathJoin(home, ".codebuddy");
+    const workBuddyHome = pathJoin(home, ".workbuddy");
+    assert.equal(defaultCodeBuddyHome({ WORKBUDDY_HOME: "/other/workbuddy" }, home, platform), cliHome);
+    assert.equal(defaultWorkBuddyHome({ CODEBUDDY_HOME: "/other/codebuddy" }, home, platform), workBuddyHome);
+    assert.equal(defaultCodeBuddyHome({ CODEBUDDY_CONFIG_DIR: "/native/cli" }, home, platform), "/native/cli");
+    assert.equal(defaultWorkBuddyHome({ WORKBUDDY_HOME: "/native/workbuddy" }, home, platform), "/native/workbuddy");
+  }
+  const env = { MEMORAX_CODE_CODEBUDDY_COMMAND: "/cli", MEMORAX_CODE_WORKBUDDY_COMMAND: "/app" };
+  assert.equal(resolveHookCodeBuddyCommand({ env, client: "codebuddy" }), "/cli");
+  assert.equal(resolveHookCodeBuddyCommand({ env, client: "workbuddy" }), "/app");
+  assert.equal(resolveHookCodeBuddyCommand({ env: { WORKBUDDY_CODEBUDDY_PATH: "/app" }, client: "codebuddy" }), "codebuddy");
+  assert.throws(() => resolveHookCodeBuddyCommand({ env: { CODEBUDDY_CLI_PATH: "/cli" }, client: "workbuddy", platform: "linux", pathExists: () => false }), /WorkBuddy runtime is unavailable/);
 });
 
 test("builds a native Windows Hook command without the WorkBuddy root placeholder", () => {
@@ -73,6 +63,7 @@ test("quotes the absolute global Hook path for a POSIX shell", { skip: process.p
 test("finds WorkBuddy's bare Windows CLI for Repo Memory jobs", () => {
   const command = "C:\\Users\\tester\\AppData\\Local\\Programs\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy";
   assert.equal(resolveHookCodeBuddyCommand({
+    client: "workbuddy",
     env: { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
     platform: "win32",
     pathExists: (candidate) => candidate === command,
@@ -220,78 +211,156 @@ test("installs and removes an isolated CodeBuddy plugin registry entry", async (
   assert.equal(await readFile(join(home, "skills", "user-skill", "SKILL.md"), "utf8"), "user-owned\n");
 });
 
-test("reconciles a managed legacy .codebuddy home when .workbuddy is selected", async () => {
-  const profile = await mkdtemp(join(tmpdir(), "memorax-codebuddy-migration-"));
+test("retains each client target and never cleans up the other native home", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "memorax-codebuddy-independent-"));
   const workBuddyHome = join(profile, ".workbuddy");
-  const legacyHome = join(profile, ".codebuddy");
+  const cliHome = join(profile, ".codebuddy");
   const memoraxCodeHome = join(profile, ".memorax-code");
-  await mkdir(join(legacyHome, "plugins"), { recursive: true });
-  await mkdir(join(legacyHome, "skills", "user-skill"), { recursive: true });
-  await writeFile(join(legacyHome, "skills", "user-skill", "SKILL.md"), "user-owned\n");
-  await writeFile(codeBuddySettingsPath(legacyHome), JSON.stringify({ enabledPlugins: {
-    "user-plugin@user-marketplace": true,
-  }}));
-  await writeFile(knownMarketplacesPath(legacyHome), JSON.stringify({
-    "user-marketplace": { type: "directory", source: { path: "/user/marketplace" } },
-  }));
-  await writeFile(join(legacyHome, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: {
-    "user-plugin@user-marketplace": [{ scope: "user", installPath: "/user/plugin", enabled: true }],
-  }}));
-  await enableCodeBuddyAdapter({ codeBuddyHome: legacyHome, platform: "win32" });
-  await mkdir(join(legacyHome, "plugins", "cache", "memorax-code-local", "memorax-code-codebuddy-adapter", "0.1.9"), { recursive: true });
-  await mkdir(join(legacyHome, "plugins", "cache", "memorax-code-codebuddy-adapter", "0.1.9"), { recursive: true });
-  await mkdir(workBuddyHome, { recursive: true });
-
-  const legacyStatus = await readCodeBuddyAdapterStatus({
-    codeBuddyHome: workBuddyHome,
-    memoraxCodeHome,
-    platform: "win32",
-  });
-  assert.equal(legacyStatus.installed, false);
-  assert.equal(legacyStatus.legacyManaged, true);
-  assert.equal(legacyStatus.legacyCodeBuddyHome, legacyHome);
-
-  const disabled = await disableCodeBuddyAdapter({ codeBuddyHome: workBuddyHome, platform: "win32" });
-  assert.equal(disabled.installed, true);
-  assert.equal(disabled.legacyManaged, true);
-  assert.equal(disabled.legacyCodeBuddyHome, legacyHome);
-  const disabledLegacySettings = JSON.parse(await readFile(codeBuddySettingsPath(legacyHome), "utf8"));
-  assert.equal(disabledLegacySettings.enabledPlugins["memorax-code-codebuddy-adapter@memorax-code-local"], false);
-  assert.equal(disabledLegacySettings.hooks.UserPromptSubmit, undefined);
-
-  await enableCodeBuddyAdapter({
-    codeBuddyHome: workBuddyHome,
-    memoraxCodeHome,
-    platform: "win32",
-  });
-  assert.equal(await exists(marketplaceRoot(legacyHome)), false);
-  assert.equal(await exists(join(legacyHome, "plugins", "cache", "memorax-code-local", "memorax-code-codebuddy-adapter")), false);
-  assert.equal(await exists(join(legacyHome, "plugins", "cache", "memorax-code-codebuddy-adapter")), false);
-  const migratedLegacySettings = JSON.parse(await readFile(codeBuddySettingsPath(legacyHome), "utf8"));
-  assert.equal(migratedLegacySettings.enabledPlugins["memorax-code-codebuddy-adapter@memorax-code-local"], undefined);
-  assert.equal(migratedLegacySettings.enabledPlugins["user-plugin@user-marketplace"], true);
-  assert.equal(migratedLegacySettings.hooks.UserPromptSubmit, undefined);
-  const migratedLegacyKnown = JSON.parse(await readFile(knownMarketplacesPath(legacyHome), "utf8"));
-  assert.equal(migratedLegacyKnown["memorax-code-local"], undefined);
-  assert.ok(migratedLegacyKnown["user-marketplace"]);
-  const migratedLegacyRegistry = JSON.parse(await readFile(join(legacyHome, "plugins", "installed_plugins.json"), "utf8"));
-  assert.equal(migratedLegacyRegistry.plugins["memorax-code-codebuddy-adapter@memorax-code-local"], undefined);
-  assert.ok(migratedLegacyRegistry.plugins["user-plugin@user-marketplace"]);
-  assert.equal(await readFile(join(legacyHome, "skills", "user-skill", "SKILL.md"), "utf8"), "user-owned\n");
-
-  await enableCodeBuddyAdapter({ codeBuddyHome: legacyHome, platform: "win32" });
-  const removed = await removeCodeBuddyPluginInstallation({
-    codeBuddyHome: workBuddyHome,
-    platform: "win32",
-  });
-  assert.equal(removed.removed, true);
+  const shared = { memoraxCodeHome, platform: "win32" };
+  await enableCodeBuddyAdapter({ ...shared, codeBuddyHome: cliHome, codeBuddyCommand: "cli-runtime" });
+  await enableCodeBuddyAdapter({ ...shared, client: "workbuddy", codeBuddyHome: workBuddyHome, codeBuddyCommand: "app-runtime" });
+  assert.equal((await readManagedCodeBuddyTarget(shared)).codeBuddyHome, cliHome);
+  assert.equal((await readManagedCodeBuddyTarget({ ...shared, client: "workbuddy" })).codeBuddyHome, workBuddyHome);
+  assert.equal((await readCodeBuddyAdapterStatus(shared)).enabled, true);
+  const workBuddy = await readCodeBuddyAdapterStatus({ ...shared, client: "workbuddy" });
+  assert.equal(workBuddy.runtime, "workbuddy");
+  assert.equal(workBuddy.enabled, true);
+  assert.match(workBuddy.codebuddyHooks.observationPath, /workbuddy[/\\]runtime-observed.json$/);
+  const metadata = JSON.parse(await readFile(join(codeBuddyInstallPath(workBuddyHome), ".memorax-code-package.json"), "utf8"));
+  assert.equal(metadata.client, "workbuddy");
+  assert.equal(metadata.codeBuddyHome, workBuddyHome);
+  assert.equal(resolveHookCodeBuddyCommand({ pluginRoot: codeBuddyInstallPath(workBuddyHome), env: { MEMORAX_CODE_WORKBUDDY_COMMAND: "changed" } }), "app-runtime");
+  await assert.rejects(() => enableCodeBuddyAdapter({ ...shared, client: "workbuddy", codeBuddyHome: cliHome, codeBuddyCommand: "app-runtime" }), /managed for codebuddy/);
+  const wrongTarget = { ...shared, client: "workbuddy", codeBuddyHome: cliHome };
+  assert.equal((await readCodeBuddyAdapterStatus(wrongTarget)).installed, false);
+  assert.equal((await disableCodeBuddyAdapter(wrongTarget)).installed, false);
+  assert.equal((await removeCodeBuddyPluginInstallation(wrongTarget)).removed, false);
+  const targetRecordPath = join(memoraxCodeHome, "adapters", "workbuddy", "installation.json");
+  const targetRecord = await readFile(targetRecordPath, "utf8");
+  await writeFile(targetRecordPath, JSON.stringify({ ...JSON.parse(targetRecord), codeBuddyHome: cliHome }));
+  await assert.rejects(() => disableCodeBuddyAdapter(wrongTarget), /conflicting workbuddy installation record/);
+  await writeFile(targetRecordPath, targetRecord);
+  assert.equal((await readCodeBuddyAdapterStatus(shared)).enabled, true);
+  await disableCodeBuddyAdapter({ ...shared, client: "workbuddy" });
+  assert.equal((await readCodeBuddyAdapterStatus(shared)).enabled, true);
+  assert.equal((await readCodeBuddyAdapterStatus({ ...shared, client: "workbuddy" })).enabled, false);
+  const workBuddyRemoval = await removeCodeBuddyPluginInstallation({ ...shared, client: "workbuddy" });
+  assert.equal(workBuddyRemoval.action, "workbuddy-plugin-remove");
   assert.equal(await exists(marketplaceRoot(workBuddyHome)), false);
-  assert.equal(await exists(marketplaceRoot(legacyHome)), false);
-  const removedLegacyRegistry = JSON.parse(await readFile(join(legacyHome, "plugins", "installed_plugins.json"), "utf8"));
-  assert.equal(removedLegacyRegistry.plugins["memorax-code-codebuddy-adapter@memorax-code-local"], undefined);
-  assert.ok(removedLegacyRegistry.plugins["user-plugin@user-marketplace"]);
-  assert.equal(JSON.parse(await readFile(codeBuddySettingsPath(legacyHome), "utf8")).hooks.UserPromptSubmit, undefined);
-  assert.equal(JSON.parse(await readFile(codeBuddySettingsPath(workBuddyHome), "utf8")).hooks.UserPromptSubmit, undefined);
+  assert.equal(await exists(marketplaceRoot(cliHome)), true);
+  await removeCodeBuddyPluginInstallation(shared);
+  assert.equal(await exists(marketplaceRoot(cliHome)), false);
+});
+
+test("removal clears a retained Windows-equivalent target spelling", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-remove-target-"));
+  const nativeHome = join(root, "native-home");
+  const options = { client: "workbuddy", memoraxCodeHome: join(root, "memorax"), codeBuddyHome: nativeHome, platform: "win32" };
+  await enableCodeBuddyAdapter({ ...options, codeBuddyCommand: "fixture-workbuddy" });
+  const targetPath = join(options.memoraxCodeHome, "adapters", "workbuddy", "installation.json");
+  const retained = JSON.parse(await readFile(targetPath, "utf8"));
+  // Vary only the persisted spelling so this Windows comparison runs on case-sensitive hosts too.
+  await writeFile(targetPath, JSON.stringify({ ...retained, codeBuddyHome: join(root, "NATIVE-HOME") }));
+  const removed = await removeCodeBuddyPluginInstallation(options);
+  assert.equal(removed.removed, true);
+  assert.equal(await exists(marketplaceRoot(nativeHome)), false);
+  assert.equal(await exists(targetPath), false);
+  assert.equal(await readManagedCodeBuddyTarget(options), undefined);
+});
+
+test("adapter CLI retains an absolute installation target across process cwd and environment changes", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "memorax-codebuddy-relative-target-")));
+  const otherCwd = join(root, "other-cwd");
+  await mkdir(otherCwd);
+  const cli = new URL("../src/cli.mjs", import.meta.url);
+  const env = { ...process.env, MEMORAX_CODE_HOME: join(root, "memorax"), MEMORAX_CODE_CODEBUDDY_COMMAND: "fixture-cli" };
+  const enabled = spawnSync(process.execPath, [fileURLToPath(cli), "enable", "--codebuddy-home", "relative-native", "--json"], { cwd: root, env, encoding: "utf8" });
+  assert.equal(enabled.status, 0, enabled.stderr);
+  assert.equal(JSON.parse(enabled.stdout).codeBuddyHome, join(root, "relative-native"));
+  const changedEnv = { ...env, CODEBUDDY_HOME: join(root, "changed-home"), MEMORAX_CODE_CODEBUDDY_COMMAND: "other-cli" };
+  const status = spawnSync(process.execPath, [fileURLToPath(cli), "status", "--json"], { cwd: otherCwd, env: changedEnv, encoding: "utf8" });
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(JSON.parse(status.stdout).codeBuddyHome, join(root, "relative-native"));
+  const removed = spawnSync(process.execPath, [fileURLToPath(cli), "remove", "--json"], { cwd: otherCwd, env: changedEnv, encoding: "utf8" });
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.equal(JSON.parse(removed.stdout).removed, true);
+  assert.equal(await exists(join(root, "changed-home")), false);
+});
+
+test("recognizes legacy WorkBuddy roots without claiming independent CLI installations", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "memorax-codebuddy-legacy-roots-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const homeKeys = ["HOME", "USERPROFILE", "CODEBUDDY_HOME", "CODEBUDDY_CONFIG_DIR", "WORKBUDDY_HOME"];
+  const previousEnv = { ...process.env };
+  t.after(() => {
+    for (const key of homeKeys) {
+      if (previousEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = previousEnv[key];
+    }
+  });
+  const clients = { codebuddy: true };
+  for (const [name, homeName, overrides, expectedClient] of [
+    ["default", ".workbuddy", {}, "workbuddy"],
+    ["configured", "custom-native", { configured: true }, "workbuddy"],
+    ["environment", "custom-native", { environment: true }, "workbuddy"],
+    ["cli", ".codebuddy", {}, "codebuddy"],
+    ["explicit-cli", ".workbuddy", { client: "codebuddy" }, "codebuddy"],
+  ]) {
+    const homeDir = join(root, name);
+    const nativeHome = join(homeDir, homeName);
+    Object.assign(process.env, { HOME: homeDir, USERPROFILE: homeDir,
+      CODEBUDDY_HOME: join(homeDir, ".codebuddy"), CODEBUDDY_CONFIG_DIR: "",
+      WORKBUDDY_HOME: overrides.environment ? nativeHome : "",
+    });
+    const options = { memoraxCodeHome: join(homeDir, "state"),
+      ...(overrides.configured ? { workBuddyHome: nativeHome } : {}),
+    };
+    const pluginRoot = join(marketplaceRoot(nativeHome), "plugins", "memorax-code-codebuddy-adapter");
+    await mkdir(pluginRoot, { recursive: true });
+    const metadata = { version: 1, codeBuddyHome: nativeHome, codeBuddyCommand: "/usr/local/bin/codebuddy",
+      ...(overrides.client ? { client: overrides.client } : {}),
+    };
+    await writeFile(join(pluginRoot, ".memorax-code-package.json"), JSON.stringify(metadata));
+    assert.deepEqual(await resolveCodeBuddyClientSelection(clients, options),
+      expectedClient === "workbuddy" ? { codebuddy: false, workbuddy: true } : clients, name);
+    const target = await readManagedCodeBuddyTarget({ ...options, client: expectedClient, codeBuddyHome: nativeHome });
+    assert.equal(target?.codeBuddyHome, nativeHome, name);
+    assert.equal(target?.codeBuddyCommand, metadata.codeBuddyCommand, name);
+    assert.equal(await readManagedCodeBuddyTarget({ ...options,
+      client: expectedClient === "workbuddy" ? "codebuddy" : "workbuddy", codeBuddyHome: nativeHome,
+    }), undefined, name);
+    if (overrides.configured) {
+      const enabled = spawnSync(process.execPath, [fileURLToPath(new URL("../src/cli.mjs", import.meta.url)),
+        "enable", "--workbuddy-home", homeName, "--json",
+      ], { cwd: homeDir, env: { ...process.env, MEMORAX_CODE_HOME: options.memoraxCodeHome }, encoding: "utf8" });
+      assert.equal(enabled.status, 0, enabled.stderr);
+      assert.equal(JSON.parse(enabled.stdout).codeBuddyHome, nativeHome);
+      assert.equal(JSON.parse(await readFile(join(pluginRoot, ".memorax-code-package.json"), "utf8")).client, "workbuddy");
+    }
+  }
+});
+
+test("maps only unqualified owned WorkBuddy metadata to the WorkBuddy selection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-legacy-selection-"));
+  const options = { memoraxCodeHome: join(root, "memorax"), codeBuddyHome: join(root, "cli"), workBuddyHome: join(root, "workbuddy") };
+  const clients = { codex: true, claude: false, codebuddy: true };
+  assert.equal(await resolveCodeBuddyClientSelection(clients, options), clients);
+  const pluginRoot = join(marketplaceRoot(options.workBuddyHome), "plugins", "memorax-code-codebuddy-adapter");
+  await mkdir(pluginRoot, { recursive: true });
+  const metadata = { version: 1, codeBuddyHome: options.workBuddyHome, codeBuddyCommand: "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy" };
+  await writeFile(join(pluginRoot, ".memorax-code-package.json"), JSON.stringify(metadata));
+  assert.deepEqual(await resolveCodeBuddyClientSelection(clients, options), { ...clients, codebuddy: false, workbuddy: true });
+  assert.deepEqual(await resolveCodeBuddyClientSelection({ ...clients, workbuddy: false }, options), { ...clients, workbuddy: false });
+  await enableCodeBuddyAdapter({ ...options, codeBuddyCommand: "cli-runtime" });
+  assert.deepEqual(await resolveCodeBuddyClientSelection(clients, options), { ...clients, workbuddy: true });
+  const legacyHomeOptions = { ...options, codeBuddyHome: options.workBuddyHome, workBuddyHome: undefined };
+  assert.deepEqual(await resolveCodeBuddyClientSelection(clients, legacyHomeOptions), { ...clients, workbuddy: true }, "old WorkBuddy home flag must not hide the independent CLI target");
+  await enableCodeBuddyAdapter({ ...options, client: "workbuddy", codeBuddyHome: options.workBuddyHome });
+  assert.equal((await readManagedCodeBuddyTarget({ ...options, client: "workbuddy", codeBuddyHome: options.workBuddyHome })).legacyClientAlias, true);
+  assert.deepEqual(await resolveCodeBuddyClientSelection(clients, options), { ...clients, workbuddy: true }, "retain the old selection after rewriting Hook metadata");
+  assert.deepEqual(await resolveCodeBuddyClientSelection(clients, legacyHomeOptions), { ...clients, workbuddy: true }, "retain both targets after rewriting old WorkBuddy metadata");
+  const freshOptions = { ...options, memoraxCodeHome: join(root, "fresh-memorax") };
+  assert.equal(await resolveCodeBuddyClientSelection(clients, freshOptions), clients, "new explicit metadata does not imply an old selection");
 });
 
 test("installs the complete plugin when the package lives under node_modules", async () => {
@@ -396,6 +465,19 @@ test("malformed CodeBuddy registry fails closed", async () => {
   await writeFile(codeBuddySettingsPath(otherHome), JSON.stringify(settings));
   await assert.rejects(() => enableCodeBuddyAdapter({ codeBuddyHome: otherHome }), /invalid CodeBuddy UserPromptSubmit Hook settings/);
   assert.deepEqual(JSON.parse(await readFile(codeBuddySettingsPath(otherHome), "utf8")), settings);
+});
+
+test("failed installation retains its target while cleanup preserves a native home that is a file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-blocked-home-"));
+  const home = join(root, "native-home");
+  const memoraxCodeHome = join(root, "memorax");
+  await writeFile(home, "user-owned file");
+  await assert.rejects(() => enableCodeBuddyAdapter({ codeBuddyHome: home, memoraxCodeHome }), /ENOTDIR/);
+  assert.equal((await readManagedCodeBuddyTarget({ memoraxCodeHome })).codeBuddyHome, home);
+  assert.equal((await disableCodeBuddyAdapter({ memoraxCodeHome })).installed, false);
+  assert.equal((await readCodeBuddyAdapterStatus({ memoraxCodeHome })).installed, false);
+  assert.equal((await readManagedCodeBuddyTarget({ memoraxCodeHome })).codeBuddyHome, home);
+  assert.equal(await readFile(home, "utf8"), "user-owned file");
 });
 
 test("recovers an abandoned legacy registry lock without losing user plugins", async () => {

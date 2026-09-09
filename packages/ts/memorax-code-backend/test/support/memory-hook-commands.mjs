@@ -15,6 +15,7 @@ export function memoryHookCommands() {
     turnId: contentTurnId("session-codebuddy", 0, prompt),
     transcriptPath,
   };
+  const workbuddy = { ...codebuddy, client: "workbuddy" };
   const trae = {
     ...base("trae"),
     turnId: contentTurnId("session-trae", 1_700_000_000_000, prompt),
@@ -40,6 +41,7 @@ export function memoryHookCommands() {
       writeback: { ...base("dsh"), turn: 1, startSeq: 0, endSeq: 1, cwd, sessionHeader: {}, events: [] },
     },
     { start: { ...codebuddy, prompt }, writeback: codebuddy },
+    { start: { ...workbuddy, prompt }, writeback: workbuddy },
     { start: trae, writeback: { ...trae, lastAssistantMessage: `  ${lastAssistantMessage}  ` } },
   ];
 }

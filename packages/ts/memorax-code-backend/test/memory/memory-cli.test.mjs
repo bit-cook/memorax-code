@@ -16,6 +16,7 @@ import {
 } from "../../dist/trace/context.js";
 import {
   claudeTracePaths,
+  clientTracePaths,
   codeBuddyTracePaths,
   dshTracePaths,
   openCodeTracePaths,
@@ -217,7 +218,7 @@ test("memory CLI rejects a nested repository outside the current turn scope", as
   assert.equal(result.workspaceScopeReason, "workspace_scope_mismatch");
   assert.equal(
     result.userAction,
-    "Start a new Codex, Claude Code, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace.",
+    "Start a new Codex, Claude Code, CodeBuddy CLI, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace.",
   );
   assert.equal(requestCount, 0);
 });
@@ -338,7 +339,7 @@ test("memory CLI gives the same scope recovery guidance for a Claude turn", asyn
   assert.equal(result.workspaceScopeReason, "workspace_scope_mismatch");
   assert.equal(
     result.userAction,
-    "Start a new Codex, Claude Code, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace.",
+    "Start a new Codex, Claude Code, CodeBuddy CLI, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace.",
   );
   assert.equal(requestCount, 0);
 });
@@ -903,14 +904,15 @@ test("memory CLI search binds to the current WorkBuddy trace and workspace", asy
     mkdir(nestedCwd, { recursive: true }),
     mkdir(otherWorkspace, { recursive: true }),
   ]);
-  await writeCurrentCodeBuddyTurn(traceContextFromCodeBuddyHookBody({
+  await writeCurrentTraceTurn(traceContextFromCodeBuddyHookBody({
+    client: "workbuddy",
     session_id: sessionId,
     turn_id: "workbuddy-turn",
     cwd: workspace,
-  }), { memoraxCodeHome: root });
+  }), { client: "workbuddy", memoraxCodeHome: root });
   const requests = [];
   const env = {
-    MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT: "codebuddy",
+    MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT: "workbuddy",
     MEMORAX_CODE_MEMORY_CLI_TRACE_SESSION_ID: sessionId,
     MEMORAX_CODE_HOME: root,
     MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
@@ -944,31 +946,32 @@ test("memory CLI search binds to the current WorkBuddy trace and workspace", asy
   assert.equal(rejected.workspaceScopeReason, "workspace_scope_mismatch");
   assert.equal(
     rejected.userAction,
-    "Start a new Codex, Claude Code, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace.",
+    "Start a new Codex, Claude Code, CodeBuddy CLI, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace.",
   );
   assert.equal(requests.length, 1);
 
-  const events = (await readFile(codeBuddyTracePaths(root).eventsJsonl(sessionId), "utf8"))
+  const events = (await readFile(clientTracePaths("workbuddy", root).eventsJsonl(sessionId), "utf8"))
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
   assert.equal(events.length, 1);
   assert.equal(events[0].type, "memory_cli_search");
   assert.equal(events[0].source, "memory_cli");
-  assert.equal(events[0].trace.client, "codebuddy");
+  assert.equal(events[0].trace.client, "workbuddy");
   assert.equal(events[0].trace.session_id, sessionId);
   assert.equal(events[0].trace.turn_id, "workbuddy-turn");
   assert.equal(events[0].trace.context_origin, "current-turn-file");
 });
 
-test("memory CLI keeps same-ID General client bindings separate from an inherited Codex thread", async (t) => {
+test("memory CLI keeps same-ID client bindings separate from an inherited Codex thread", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-cli-general-client-trace-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sessionId = "shared-cli-session";
   const clients = [
     { client: "opencode", workspace: join(root, "Default Project"), turnId: "opencode-user-message", paths: openCodeTracePaths },
-    { client: "codebuddy", workspace: join(root, "WorkBuddy"), turnId: "workbuddy-turn", paths: codeBuddyTracePaths },
+    { client: "workbuddy", workspace: join(root, "WorkBuddy"), turnId: "workbuddy-turn", paths: (home) => clientTracePaths("workbuddy", home) },
     { client: "codex", workspace: join(root, "new-chat"), turnId: "codex-turn", paths: tracePaths },
+    { client: "codebuddy", workspace: join(root, "cli-workspace"), turnId: "codebuddy-turn", paths: codeBuddyTracePaths },
   ];
   for (const { workspace } of clients) await mkdir(join(workspace, "work"), { recursive: true });
   await writeCurrentCodexTurn(traceContextFromHookBody({
@@ -977,12 +980,15 @@ test("memory CLI keeps same-ID General client bindings separate from an inherite
     cwd: clients[2].workspace,
     workspace_kind: "projectless",
   }), { memoraxCodeHome: root });
-  await writeCurrentCodeBuddyTurn(traceContextFromCodeBuddyHookBody({
-    session_id: sessionId,
-    turn_id: "workbuddy-turn",
-    cwd: clients[1].workspace,
-    workspace_kind: "projectless",
-  }), { memoraxCodeHome: root });
+  for (const { client, workspace, turnId } of [clients[1], clients[3]]) {
+    await writeCurrentTraceTurn(traceContextFromCodeBuddyHookBody({
+      client,
+      session_id: sessionId,
+      turn_id: turnId,
+      cwd: workspace,
+      ...(client === "workbuddy" ? { workspace_kind: "projectless" } : {}),
+    }), { client, memoraxCodeHome: root });
+  }
   await writeCurrentTraceTurn(traceContextFromOpenCodeHookBody({
     sessionId,
     userMessageId: "opencode-user-message",
@@ -1001,7 +1007,7 @@ test("memory CLI keeps same-ID General client bindings separate from an inherite
     const options = {
       env: {
         CODEX_THREAD_ID: sessionId,
-        ...(client === "codex" ? {} : client === "codebuddy" ? {
+        ...(client === "codex" ? {} : (client === "codebuddy" || client === "workbuddy") ? {
           CODEBUDDY_SESSION_ID: sessionId,
         } : {
           MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT: client,
@@ -1017,9 +1023,9 @@ test("memory CLI keeps same-ID General client bindings separate from an inherite
     };
     const result = await runMemoryCli(["search", "--query", "shared general preference"], options);
     assert.equal(result.ok, true, client);
-    assert.equal(result.scopeKind, "general", client);
+    assert.equal(result.scopeKind, client === "codebuddy" ? "local-directory" : "general", client);
     assert.equal(requests.length, index + 1);
-    assert.equal(requests[index].user_id, "user-1@General", client);
+    assert.equal(requests[index].user_id, client === "codebuddy" ? "user-1@cli-workspace" : "user-1@General", client);
     const events = (await readFile(paths(root).eventsJsonl(sessionId), "utf8"))
       .trim()
       .split("\n")
@@ -1041,6 +1047,67 @@ test("memory CLI keeps same-ID General client bindings separate from an inherite
     assert.equal(rejected.ok, false, client);
     assert.equal(rejected.workspaceScopeReason, "workspace_scope_mismatch", client);
     assert.equal(requests.length, index + 1, "shared remote identity must not permit a different local workspace");
+  }
+  const workBuddyWorkspace = clients[1].workspace;
+  await writeCurrentCodeBuddyTurn(traceContextFromCodeBuddyHookBody({
+    session_id: sessionId,
+    turn_id: "codebuddy-shared-workspace",
+    cwd: workBuddyWorkspace,
+  }), { memoraxCodeHome: root });
+  const nativeOptions = {
+    cwd: join(workBuddyWorkspace, "work"),
+    env: {
+      CODEBUDDY_SESSION_ID: sessionId,
+      MEMORAX_CODE_HOME: root,
+      MEMORAX_CODE_MEMORAX_ENDPOINT: "http://memorax.test",
+      MEMORAX_CODE_MEMORAX_API_KEY: "secret",
+      MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
+    },
+    fetchImpl,
+  };
+  const ambiguous = await runMemoryCli(["search", "--query", "ambiguous native client"], nativeOptions);
+  assert.equal(ambiguous.ok, false);
+  assert.match(ambiguous.error, /cannot uniquely bind/);
+  assert.equal(requests.length, clients.length);
+  for (const client of ["workbuddy", "codebuddy"]) {
+    const explicit = await runMemoryCli(["search", "--query", "explicit native client"], {
+      ...nativeOptions,
+      env: {
+        ...nativeOptions.env,
+        MEMORAX_CODE_MEMORY_CLI_TRACE_CLIENT: client,
+        MEMORAX_CODE_MEMORY_CLI_TRACE_SESSION_ID: sessionId,
+      },
+    });
+    assert.equal(explicit.ok, true, client);
+    assert.equal(explicit.scopeKind, client === "workbuddy" ? "general" : "local-directory", client);
+  }
+  for (const scenario of ["missing", "stale"]) {
+    const fallbackSessionId = `${scenario}-native-session`;
+    if (scenario === "stale") {
+      for (const client of ["codebuddy", "workbuddy"]) {
+        await writeCurrentTraceTurn(traceContextFromCodeBuddyHookBody({
+          client,
+          session_id: fallbackSessionId,
+          turn_id: "expired-turn",
+          cwd: workBuddyWorkspace,
+          workspace_kind: "projectless",
+        }), { client, memoraxCodeHome: root, now: () => new Date(0) });
+      }
+    }
+    const previousRequests = requests.length;
+    const fallback = await runMemoryCli(["search", "--query", `${scenario} native turn uses cwd`], {
+      ...nativeOptions,
+      cwd: clients[3].workspace,
+      env: { ...nativeOptions.env, CODEBUDDY_SESSION_ID: fallbackSessionId },
+    });
+    assert.equal(fallback.ok, true, scenario);
+    assert.equal(fallback.scopeKind, "local-directory", scenario);
+    assert.equal(fallback.effectiveUserId, "user-1@cli-workspace", scenario);
+    assert.equal(requests.length, previousRequests + 1, scenario);
+    assert.equal(requests.at(-1).user_id, "user-1@cli-workspace", scenario);
+    for (const client of ["codebuddy", "workbuddy"]) {
+      await assert.rejects(readFile(clientTracePaths(client, root).eventsJsonl(fallbackSessionId), "utf8"));
+    }
   }
 });
 

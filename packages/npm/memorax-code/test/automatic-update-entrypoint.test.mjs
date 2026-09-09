@@ -72,6 +72,7 @@ async function createFixture(t) {
   }));
   const commonRoot = join(packageRoot, "..", "..", "ts", "memorax-code-adapter-common", "src");
   await Promise.all([
+    "clients/codebuddy-command.mjs",
     "config-utils.mjs",
     "automatic-update-state.mjs",
     "runtime-record.mjs",

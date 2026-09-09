@@ -7,13 +7,22 @@ import { resolveCommonSourceRoot } from "./common-runtime.mjs";
 const hookDir = dirname(fileURLToPath(import.meta.url));
 const pluginRoot = dirname(hookDir);
 const commonRoot = resolveCommonSourceRoot(pluginRoot);
-const { resolveHookCodeBuddyCommand } = await import(pathToFileURL(join(commonRoot, "clients", "codebuddy-command.mjs")).href);
+const { codeBuddyMetadataClient, readCodeBuddyPackageMetadata, resolveHookCodeBuddyCommand } = await import(pathToFileURL(join(commonRoot, "clients", "codebuddy-command.mjs")).href);
 const { runRepoMemoryJob } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-memory-job-supervisor.mjs")).href);
 const { evaluateRepository } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-memory-update-policy-evaluator.mjs")).href);
 
 try {
+  const metadata = readCodeBuddyPackageMetadata(pluginRoot);
+  const client = codeBuddyMetadataClient(metadata) ?? "codebuddy";
+  if (metadata?.client !== undefined && metadata.client !== client) throw new Error("invalid CodeBuddy adapter client");
+  if (typeof metadata?.codeBuddyHome === "string" && metadata.codeBuddyHome.trim()) {
+    process.env.CODEBUDDY_HOME = metadata.codeBuddyHome;
+    process.env.CODEBUDDY_CONFIG_DIR = metadata.codeBuddyHome;
+    if (client === "workbuddy") process.env.WORKBUDDY_HOME = metadata.codeBuddyHome;
+    else delete process.env.WORKBUDDY_HOME;
+  }
   const payload = runRepoMemoryJob(process.argv.slice(2), {
-    runner: "codebuddy",
+    runner: client,
     finalMessageSource: "stdout",
     memorySkillInvocation: "the `memorax-code` skill",
     validatorPath: resolve(pluginRoot, "skills/memorax-code/scripts/repo-memory.mjs"),
@@ -21,6 +30,7 @@ try {
     createCommand({ prompt }) {
       const codeBuddy = resolveHookCodeBuddyCommand({
         pluginRoot,
+        client,
       });
       return [
         codeBuddy,

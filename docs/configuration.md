@@ -68,8 +68,8 @@ fails rather than performing an unlocked update.
 If `[clients]` is absent, lifecycle commands select Codex, Claude Code, DSH,
 and OpenCode; CodeBuddy/WorkBuddy and Trae are opt-in unless detected during
 foreground setup. If the table is present, `codex`, `claude`, `dsh`,
-`opencode`, `codebuddy`, and `trae` are boolean fields. Direct lifecycle
-commands treat omitted `codex`, `claude`, `opencode`, `codebuddy`, or `trae`
+`opencode`, `codebuddy`, `workbuddy`, and `trae` are boolean fields. Direct lifecycle
+commands treat omitted `codex`, `claude`, `opencode`, `codebuddy`, `workbuddy`, or `trae`
 values as disabled. Setup and update reconciliation retain an omitted field as
 an undecided choice for client support added after the configuration was
 written. An omitted `dsh` value remains enabled so configurations written
@@ -78,7 +78,7 @@ explicitly to disable that integration. The command-line override accepts a
 comma-separated subset:
 
 ```text
---clients codex|claude|dsh|opencode|codebuddy|trae|<comma-separated subset>|all|none
+--clients codex|claude|dsh|opencode|codebuddy|workbuddy|trae|<comma-separated subset>|all|none
 ```
 
 Foreground `memorax-code setup` refreshes `[clients]` from the clients
@@ -270,13 +270,36 @@ native plugin layout:
 └── skills/memorax-code/
 ```
 
-`CODEBUDDY_HOME` or `WORKBUDDY_HOME` overrides the default root. Windows prefers
-`%USERPROFILE%\.workbuddy` and falls back to an existing `%USERPROFILE%\.codebuddy`
-for legacy CodeBuddy installations. When both homes exist, setup removes only the
-legacy MemoraX-managed plugin state from `.codebuddy`; other platforms use
-`~/.workbuddy`. The Skill is
-materialized from the canonical MemoraX Code Skill and is owned by the managed
-marketplace plugin.
+CodeBuddy CLI and WorkBuddy are separate managed clients that share this plugin
+implementation. They can be enabled together with `--clients codebuddy,workbuddy`.
+Each client retains its own configuration root and executable for later status,
+stop, update, uninstall, and Hook recovery:
+
+| Client | Default root | Root overrides | Runtime discovery |
+| --- | --- | --- | --- |
+| `codebuddy` | `~/.codebuddy` | `--codebuddy-home`, `CODEBUDDY_HOME`, then `CODEBUDDY_CONFIG_DIR` | Standalone `codebuddy` on PATH, or `MEMORAX_CODE_CODEBUDDY_COMMAND` / `CODEBUDDY_CLI_PATH` |
+| `workbuddy` | `~/.workbuddy` | `--workbuddy-home`, then `WORKBUDDY_HOME` | WorkBuddy's bundled runtime, or `MEMORAX_CODE_WORKBUDDY_COMMAND` / `WORKBUDDY_CODEBUDDY_PATH` |
+
+On Windows the default roots are under `%USERPROFILE%`. A proven legacy
+WorkBuddy installation may retain its existing `.codebuddy` location; that root
+cannot simultaneously belong to the standalone CLI. Choose separate roots before
+enabling both. Installation, stop, and removal never clean the other client's
+root. Retained installation records live under
+`$MEMORAX_CODE_HOME/adapters/<client>/installation.json`.
+
+Older versions represented WorkBuddy as `codebuddy`. When `workbuddy` has no
+explicit selection, owned legacy installation metadata identifies that old
+choice by its bundled command, `.workbuddy` root, or an explicitly configured
+WorkBuddy root during setup and lifecycle reconciliation. A `.codebuddy` root
+with a PATH command alone does not distinguish the two clients and retains
+the CLI identity. An explicit `workbuddy = true` or `false` takes precedence;
+explicit client identity in installation metadata also takes precedence over
+legacy inference. Historical traces stay in their original client
+namespace; newly installed Hooks use the distinct client identities.
+
+The Skill is materialized from the canonical MemoraX Code Skill. CodeBuddy's
+standalone IDE uses a different native transcript format and is not covered by
+this adapter.
 
 Setup also merges a managed `UserPromptSubmit` Hook into
 `<CODEBUDDY_HOME>/settings.json`. It captures the first prompt even when the
@@ -287,10 +310,10 @@ also prevents that Hook from starting the Backend or collecting prompts.
 
 On Windows, setup writes destination-specific native Hook paths so PowerShell
 does not receive a `/c/Users/...` plugin path. `memorax-code-codebuddy status
---json` reports `codebuddyHooks.status` as `unverified` until a real WorkBuddy
+--json` reports `codebuddyHooks.status` as `unverified` until a native client
 Hook executes, `observed` afterward, and `invalid` when the installed Hook
 manifest, managed prompt Hook, or runtime is incomplete. Restart or refresh
-WorkBuddy after setup.
+the CLI or WorkBuddy after setup.
 
 ## Trae integration paths
 
@@ -601,15 +624,20 @@ not an automatic maintenance runner.
 ## Local traces
 
 `[trace.codex]`, `[trace.claude]`, `[trace.dsh]`, `[trace.opencode]`,
-`[trace.codebuddy]`, and `[trace.trae]` support the same fields:
+`[trace.codebuddy]`, `[trace.workbuddy]`, and `[trace.trae]` support the same fields:
 
-| Field | Codex environment | Claude environment | DSH environment | OpenCode environment | CodeBuddy/WorkBuddy environment | Trae environment | Fallback |
+| Field | Codex environment | Claude environment | DSH environment | OpenCode environment | CodeBuddy CLI environment | Trae environment | Fallback |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `enabled` | `MEMORAX_CODE_CODEX_TRACE_ENABLED` | `MEMORAX_CODE_CLAUDE_TRACE_ENABLED` | `MEMORAX_CODE_DSH_TRACE_ENABLED` | `MEMORAX_CODE_OPENCODE_TRACE_ENABLED` | `MEMORAX_CODE_CODEBUDDY_TRACE_ENABLED` | `MEMORAX_CODE_TRAE_TRACE_ENABLED` | `true` |
 | `capture_content` | `MEMORAX_CODE_CODEX_TRACE_CAPTURE_CONTENT` | `MEMORAX_CODE_CLAUDE_TRACE_CAPTURE_CONTENT` | `MEMORAX_CODE_DSH_TRACE_CAPTURE_CONTENT` | `MEMORAX_CODE_OPENCODE_TRACE_CAPTURE_CONTENT` | `MEMORAX_CODE_CODEBUDDY_TRACE_CAPTURE_CONTENT` | `MEMORAX_CODE_TRAE_TRACE_CAPTURE_CONTENT` | `true` |
 | `retention_days` | `MEMORAX_CODE_CODEX_TRACE_RETENTION_DAYS` | `MEMORAX_CODE_CLAUDE_TRACE_RETENTION_DAYS` | `MEMORAX_CODE_DSH_TRACE_RETENTION_DAYS` | `MEMORAX_CODE_OPENCODE_TRACE_RETENTION_DAYS` | `MEMORAX_CODE_CODEBUDDY_TRACE_RETENTION_DAYS` | `MEMORAX_CODE_TRAE_TRACE_RETENTION_DAYS` | `7` |
 | `max_event_chars` | `MEMORAX_CODE_CODEX_TRACE_MAX_EVENT_CHARS` | `MEMORAX_CODE_CLAUDE_TRACE_MAX_EVENT_CHARS` | `MEMORAX_CODE_DSH_TRACE_MAX_EVENT_CHARS` | `MEMORAX_CODE_OPENCODE_TRACE_MAX_EVENT_CHARS` | `MEMORAX_CODE_CODEBUDDY_TRACE_MAX_EVENT_CHARS` | `MEMORAX_CODE_TRAE_TRACE_MAX_EVENT_CHARS` | `20000` |
 | `max_file_bytes` | `MEMORAX_CODE_CODEX_TRACE_MAX_FILE_BYTES` | `MEMORAX_CODE_CLAUDE_TRACE_MAX_FILE_BYTES` | `MEMORAX_CODE_DSH_TRACE_MAX_FILE_BYTES` | `MEMORAX_CODE_OPENCODE_TRACE_MAX_FILE_BYTES` | `MEMORAX_CODE_CODEBUDDY_TRACE_MAX_FILE_BYTES` | `MEMORAX_CODE_TRAE_TRACE_MAX_FILE_BYTES` | `52428800` |
+
+WorkBuddy uses the corresponding `MEMORAX_CODE_WORKBUDDY_TRACE_*` variables,
+falling back to the older `MEMORAX_CODE_CODEBUDDY_TRACE_*` variables when absent.
+When `[trace.workbuddy]` is absent, its configuration inherits the older
+`[trace.codebuddy]` settings so existing trace preferences survive migration.
 
 Depending on the enabled client capabilities, content capture can include
 prompts, responses, recalled memory, writeback content, reminder text, and

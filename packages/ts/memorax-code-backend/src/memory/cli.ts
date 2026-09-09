@@ -20,7 +20,7 @@ import {
   repositoryMemoryScopeKind,
   repositoryMemoryScopesMatch,
 } from "../repository/scope.js";
-import { isTraceClient, type TraceClient } from "../trace/context.js";
+import { isTraceClient, type TraceClient, type TraceContext } from "../trace/context.js";
 import { readCurrentTraceTurn, recordTraceEvent } from "../trace/store.js";
 import {
   claimQuotaNotice,
@@ -66,7 +66,7 @@ type MemoryCliObservability = {
 };
 
 type MemoryCliTraceBinding = Readonly<{
-  client: TraceClient;
+  client: TraceClient | "codebuddy-native";
   expectedSessionId?: string;
 }>;
 
@@ -135,7 +135,7 @@ async function memorySearch(args: string[], options: MemoryCliOptions): Promise<
   if (!repositoryMemory.ok) {
     return memoryCliRepositoryFailure("memory.search", repositoryMemory, { query });
   }
-  const observability = await memoryCliObservability(options.env);
+  const observability = await memoryCliObservability(options.env, repositoryMemory.traceContext);
   const response = await invokeMemoraxMemoryProvider(
     { sessionId: memoryCliSessionId(args, options.env), prompt: query },
     {
@@ -207,7 +207,7 @@ async function memoryAdd(args: string[], options: MemoryCliOptions): Promise<Mem
   if (!repositoryMemory.ok) return memoryCliRepositoryFailure("memory.add", repositoryMemory);
 
   const sessionId = memoryCliSessionId(args, env);
-  const observability = await memoryCliObservability(env);
+  const observability = await memoryCliObservability(env, repositoryMemory.traceContext);
   const response = await invokeMemoraxMemoryProvider(
     { sessionId, prompt: memory },
     {
@@ -257,32 +257,58 @@ async function memoryAdd(args: string[], options: MemoryCliOptions): Promise<Mem
   };
 }
 
-async function resolveMemoryCliRepositoryMemory(options: MemoryCliOptions): Promise<ConfiguredRepositoryMemoryResult> {
+async function resolveMemoryCliRepositoryMemory(
+  options: MemoryCliOptions,
+): Promise<ConfiguredRepositoryMemoryResult & { traceContext?: TraceContext }> {
+  const env = options.env ?? process.env;
+  const memoraxCodeHome = defaultMemoraxCodeHome(env);
+  const binding = memoryCliTraceBinding(env);
+  if (binding?.client === "codebuddy-native") {
+    // Both products expose the same native session variable. Only a unique,
+    // exact current-turn record whose workspace validates can identify one.
+    const candidates = await Promise.all((["codebuddy", "workbuddy"] as const).map(async (client) => {
+      const current = await readCurrentTraceTurn({ client, memoraxCodeHome, env, expectedSessionId: binding.expectedSessionId });
+      if (!current.ok || !current.traceContext.turnId || !current.traceContext.cwd) return undefined;
+      const result = await resolveMemoryCliRepositoryMemoryFromTurn(options, current.traceContext);
+      return result.ok ? { ...result, traceContext: current.traceContext } : result;
+    }));
+    const matches = candidates.filter((candidate) => candidate?.ok === true);
+    if (matches.length === 1) return matches[0]!;
+    // Without an operational turn, native shell commands retain ordinary cwd
+    // scope. A present turn with conflicting scope must still fail closed.
+    if (candidates.every((candidate) => candidate === undefined)) {
+      return resolveMemoryCliRepositoryMemoryFromTurn(options);
+    }
+    return {
+      ok: false,
+      reason: "workspace_scope_mismatch",
+      error: "memory CLI cannot uniquely bind the native CodeBuddy/WorkBuddy session to a current turn in this workspace; start a new session in the target scope",
+    };
+  }
+  const current = binding
+    ? await readCurrentTraceTurn({ client: binding.client, memoraxCodeHome, env, expectedSessionId: binding.expectedSessionId })
+    : undefined;
+  const traceContext = current?.ok ? current.traceContext : undefined;
+  const result = await resolveMemoryCliRepositoryMemoryFromTurn(options, traceContext);
+  return result.ok ? { ...result, traceContext } : result;
+}
+
+async function resolveMemoryCliRepositoryMemoryFromTurn(
+  options: MemoryCliOptions,
+  traceContext?: TraceContext,
+): Promise<ConfiguredRepositoryMemoryResult> {
   const env = options.env ?? process.env;
   const memoraxCodeHome = defaultMemoraxCodeHome(env);
   let turnMemory: ConfiguredRepositoryMemoryResult | undefined;
-  const traceBinding = memoryCliTraceBinding(env);
-  if (traceBinding?.expectedSessionId) {
-    // This bridge carries operational workspace identity even when event tracing is disabled.
-    // Bind it to the exact client/session; cwd alone cannot recover projectless or parent-folder scope.
-    const current = await readCurrentTraceTurn({
-      client: traceBinding.client,
+  if (traceContext && (traceContext.cwd?.trim() || traceContext.workspaceKind?.trim().toLowerCase() === "projectless")) {
+    // The operational bridge carries exact workspace identity even when tracing is disabled.
+    turnMemory = await resolveConfiguredRepositoryMemory({
+      workspaceRoot: traceContext.cwd,
+      workspaceKind: traceContext.workspaceKind,
       memoraxCodeHome,
       env,
-      expectedSessionId: traceBinding.expectedSessionId,
     });
-    if (
-      current.ok
-      && (current.traceContext.cwd?.trim() || current.traceContext.workspaceKind?.trim().toLowerCase() === "projectless")
-    ) {
-      turnMemory = await resolveConfiguredRepositoryMemory({
-        workspaceRoot: current.traceContext.cwd,
-        workspaceKind: current.traceContext.workspaceKind,
-        memoraxCodeHome,
-        env,
-      });
-      if (!turnMemory.ok) return turnMemory;
-    }
+    if (!turnMemory.ok) return turnMemory;
   }
 
   const commandWorkspace = options.cwd ?? process.cwd();
@@ -312,7 +338,7 @@ async function resolveMemoryCliRepositoryMemory(options: MemoryCliOptions): Prom
     return commandMemory;
   }
   if (turnMemory?.ok && (!turnMemory.memory.scope || !repositoryMemoryScopesMatch(commandMemory.memory.scope, turnMemory.memory.scope))) {
-    const clientLabel = traceClientLabel(traceBinding?.client);
+    const clientLabel = traceClientLabel(traceContext?.client);
     return {
       ok: false,
       reason: "workspace_scope_mismatch",
@@ -328,9 +354,9 @@ function memoryCliRepositoryFailure(
   fields: Pick<MemoryCliResult, "query"> = {},
 ): MemoryCliResult {
   const userAction = failure.reason === "workspace_scope_mismatch"
-    ? "Start a new Codex, Claude Code, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace."
+    ? "Start a new Codex, Claude Code, CodeBuddy CLI, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace."
     : failure.reason === "workspace_scope_unavailable"
-      ? "Start a new Codex, Claude Code, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace. If the problem continues, make sure its .git metadata is readable and valid."
+      ? "Start a new Codex, Claude Code, CodeBuddy CLI, WorkBuddy, DSH, or OpenCode session from the target repository or local workspace. If the problem continues, make sure its .git metadata is readable and valid."
       : undefined;
   return {
     ok: false,
@@ -374,27 +400,19 @@ function memoryCliIdentityFields(memory: ConfiguredRepositoryMemory): Pick<
 
 async function memoryCliObservability(
   env: Record<string, string | undefined> = process.env,
+  traceContext?: TraceContext,
 ): Promise<MemoryCliObservability> {
   const memoraxCodeHome = defaultMemoraxCodeHome(env);
-  const traceBinding = memoryCliTraceBinding(env);
-  // Capture once before provider I/O so a later prompt cannot claim this command's events.
-  const current = traceBinding
-    ? await readCurrentTraceTurn({
-      client: traceBinding.client,
-      memoraxCodeHome,
-      env,
-      expectedSessionId: traceBinding.expectedSessionId,
-    })
-    : undefined;
+  // Reuse the snapshot whose scope was verified before provider I/O.
   const pending: Promise<unknown>[] = [];
-  if (!current?.ok) return { flush: async () => undefined };
+  if (!traceContext) return { flush: async () => undefined };
   return {
     hook: {
       recordEvent(event: MemoryObservabilityEvent) {
         pending.push(recordTraceEvent({
           memoraxCodeHome,
           env,
-          traceContext: current.traceContext,
+          traceContext,
           type: memoryCliTraceEventType(event),
           source: event.source,
           operation: event.operation,
@@ -431,7 +449,7 @@ function memoryCliTraceBinding(
   // Native WorkBuddy/CodeBuddy tools carry this identity even when the client
   // does not provide CODEBUDDY_ENV_FILE for the SessionStart export bridge.
   const codeBuddySessionId = env.CODEBUDDY_SESSION_ID?.trim();
-  if (codeBuddySessionId) return { client: "codebuddy", expectedSessionId: codeBuddySessionId };
+  if (codeBuddySessionId) return { client: "codebuddy-native", expectedSessionId: codeBuddySessionId };
 
   const expectedSessionId = env.CODEX_THREAD_ID?.trim();
   return expectedSessionId
@@ -447,7 +465,8 @@ function traceClientLabel(client: TraceClient | undefined): string {
   if (client === "claude") return "Claude";
   if (client === "dsh") return "DSH";
   if (client === "opencode") return "OpenCode";
-  if (client === "codebuddy") return "WorkBuddy";
+  if (client === "codebuddy") return "CodeBuddy CLI";
+  if (client === "workbuddy") return "WorkBuddy";
   return client === "codex" ? "Codex" : "coding agent";
 }
 

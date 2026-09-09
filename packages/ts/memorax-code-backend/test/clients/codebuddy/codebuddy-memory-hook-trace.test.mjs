@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMemoryCli } from "../../../dist/memory/cli.js";
 import { createCodeBuddyMemoryHookRuntime } from "../../../dist/clients/codebuddy/memory-hook-runtime.js";
-import { codeBuddyTracePaths } from "../../../dist/trace/config.js";
+import { clientTracePaths, codeBuddyTracePaths } from "../../../dist/trace/config.js";
 
 const fetchImpl = async () => new Response(JSON.stringify({ context: "retrieved context" }), {
   status: 200,
@@ -29,37 +29,10 @@ function lines(records) {
   return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
 }
 
-async function readEvents(home, sessionId) {
-  const path = codeBuddyTracePaths(home).eventsJsonl(sessionId);
+async function readEvents(home, sessionId, client = "codebuddy") {
+  const path = clientTracePaths(client, home).eventsJsonl(sessionId);
   return (await readFile(path, "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line));
 }
-
-test("CodeBuddy runtime records completed turn lifecycle trace", async () => {
-  const home = await mkdtemp(join(tmpdir(), "memorax-codebuddy-trace-"));
-  const transcriptPath = join(home, "session.jsonl");
-  const sessionId = "trace-completed";
-  await writeFile(transcriptPath, lines([
-    { id: "u1", type: "message", role: "user", sessionId, content: [{ type: "input_text", text: "<user_query>remember this</user_query>" }] },
-    { id: "a1", type: "message", role: "assistant", parentId: "u1", status: "completed", content: [{ type: "output_text", text: "done" }] },
-  ]));
-  const runtime = createCodeBuddyMemoryHookRuntime({
-    env: { MEMORAX_CODE_HOME: home },
-    fetchImpl,
-    automaticWriteback: async () => undefined,
-  });
-  const turnId = provisionalTurnId(sessionId, "remember this");
-  await runtime.recordTurnStart(command(sessionId, turnId, transcriptPath, "remember this"));
-  await runtime.writeback({ ...command(sessionId, turnId, transcriptPath, ""), client: "codebuddy" });
-  runtime.close();
-
-  const events = await readEvents(home, sessionId);
-  assert.deepEqual(events.map((event) => event.type), ["turn_start", "turn_end", "turn_materialized"]);
-  assert.equal(events[0].source, "codebuddy-hook");
-  assert.equal(events[1].outcome, "completed");
-  assert.equal(events[2].source, "codebuddy-transcript");
-  const current = JSON.parse(await readFile(codeBuddyTracePaths(home).sessionCurrentTurnPath(sessionId), "utf8"));
-  assert.equal(current.turn_state, "completed");
-});
 
 test("CodeBuddy runtime traces incomplete assistant and does not write back", async () => {
   const home = await mkdtemp(join(tmpdir(), "memorax-codebuddy-trace-"));
@@ -142,7 +115,7 @@ test("CodeBuddy next turn reconciles the previous interrupted trace without writ
   }
 });
 
-test("CodeBuddy next turn restores an assistant-less interrupted trace after runtime restart", async () => {
+test("WorkBuddy next turn restores an assistant-less interrupted trace after runtime restart", async () => {
   const home = await mkdtemp(join(tmpdir(), "memorax-codebuddy-trace-restart-"));
   const transcriptPath = join(home, "session.jsonl");
   const sessionId = "trace-restart";
@@ -156,10 +129,11 @@ test("CodeBuddy next turn restores an assistant-less interrupted trace after run
     MEMORAX_CODE_MEMORY_RETRIEVAL_ENABLED: "false",
   };
   const firstRuntime = createCodeBuddyMemoryHookRuntime({
+    client: "workbuddy",
     env,
     automaticWriteback: () => ({ accepted: true }),
   });
-  await firstRuntime.recordTurnStart(command(sessionId, firstTurnId, transcriptPath, firstPrompt));
+  await firstRuntime.recordTurnStart({ ...command(sessionId, firstTurnId, transcriptPath, firstPrompt), client: "workbuddy" });
   firstRuntime.close();
 
   const firstTranscript = lines([firstUser]);
@@ -169,6 +143,7 @@ test("CodeBuddy next turn restores an assistant-less interrupted trace after run
   const secondTurnId = provisionalTurnId(sessionId, secondPrompt, Buffer.byteLength(firstTranscript, "utf8"));
   const writes = [];
   const restarted = createCodeBuddyMemoryHookRuntime({
+    client: "workbuddy",
     env,
     automaticWriteback: (request) => {
       writes.push(request);
@@ -176,8 +151,8 @@ test("CodeBuddy next turn restores an assistant-less interrupted trace after run
     },
   });
   try {
-    await restarted.recordTurnStart(command(sessionId, secondTurnId, transcriptPath, secondPrompt));
-    const events = await readEvents(home, sessionId);
+    await restarted.recordTurnStart({ ...command(sessionId, secondTurnId, transcriptPath, secondPrompt), client: "workbuddy" });
+    const events = await readEvents(home, sessionId, "workbuddy");
     assert.deepEqual(events.map((event) => event.type), ["turn_start", "turn_end", "turn_start"]);
     assert.equal(events[1].trace.turn_id, firstTurnId);
     assert.equal(events[1].outcome, "interrupted");
@@ -189,7 +164,7 @@ test("CodeBuddy next turn restores an assistant-less interrupted trace after run
   }
 });
 
-test("CodeBuddy provisional turn writeback and nested Skill commands share General", async () => {
+test("WorkBuddy provisional turn writeback and nested Skill commands share General", async () => {
   const home = await mkdtemp(join(tmpdir(), "memorax-codebuddy-runtime-"));
   const transcriptPath = join(home, "session.jsonl");
   const workspace = join(home, "WorkBuddy");
@@ -203,7 +178,7 @@ test("CodeBuddy provisional turn writeback and nested Skill commands share Gener
     { id: "a-native", type: "message", role: "assistant", parentId: "u-native", status: "completed", timestamp: 1_700_000_060_000, content: [{ type: "output_text", text: "persisted reply" }] },
   ]));
   const requests = [];
-  const env = configuredEnv(home, { MEMORAX_CODE_CODEBUDDY_TRACE_ENABLED: "false" });
+  const env = configuredEnv(home, { MEMORAX_CODE_WORKBUDDY_TRACE_ENABLED: "false" });
   const fetchImpl = async (url, init) => {
     requests.push({ url: String(url), body: JSON.parse(init.body) });
     const data = String(url).endsWith("/add") ? { task_id: "general-add", status: "queued" } : { data: [] };
@@ -212,16 +187,17 @@ test("CodeBuddy provisional turn writeback and nested Skill commands share Gener
       headers: { "content-type": "application/json" },
     });
   };
-  const runtime = createCodeBuddyMemoryHookRuntime({ env, fetchImpl });
+  const runtime = createCodeBuddyMemoryHookRuntime({ env, fetchImpl, client: "workbuddy" });
   try {
     await runtime.recordTurnStart({
       ...command(sessionId, turnId, transcriptPath, prompt),
+      client: "workbuddy",
       cwd: workspace,
       workspaceKind: "projectless",
     });
     assert.deepEqual(await runtime.writeback({
       ...command(sessionId, turnId, transcriptPath, ""),
-      client: "codebuddy",
+      client: "workbuddy",
       cwd: workspace,
     }), { ok: true, scheduled: true });
     const deadline = Date.now() + 1_000;
@@ -263,6 +239,7 @@ test("CodeBuddy provisional turn writeback and nested Skill commands share Gener
     const nextPrompt = "continue from the child directory";
     await runtime.recordTurnStart({
       ...command(sessionId, provisionalTurnId(sessionId, nextPrompt), transcriptPath, nextPrompt),
+      client: "workbuddy",
       cwd: nested,
     });
     const nextSearch = await runMemoryCli(["search", "--query", "general preference"], options);

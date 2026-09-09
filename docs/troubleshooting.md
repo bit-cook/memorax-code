@@ -395,21 +395,40 @@ Hooks into Claude settings.
 
 ## CodeBuddy or WorkBuddy Hook is inactive
 
-```sh
+For CodeBuddy CLI:
+
+```bash
 memorax-code start --clients codebuddy
 memorax-code-codebuddy status --json
 ```
 
-On Windows, the managed plugin prefers `%USERPROFILE%\.workbuddy` and falls back
-to an existing `%USERPROFILE%\.codebuddy` for legacy CodeBuddy installations,
-while `CODEBUDDY_HOME` or `WORKBUDDY_HOME` remains an explicit override. If both
-homes exist, setup removes only the MemoraX-managed plugin registration,
-marketplace, and cache from `.codebuddy`; unrelated data remains untouched. A
-`codebuddyHooks.status` value of `unverified` means the files are configured but
-the current plugin version has not yet produced a real Hook event. Restart or
-refresh WorkBuddy, submit one prompt, and check status again. `observed` means
-the Hook entrypoint and its shared runtime loaded; `invalid` means setup should
-be rerun.
+For WorkBuddy:
+
+```bash
+memorax-code start --clients workbuddy
+memorax-code status --clients workbuddy --json
+```
+
+To manage both, use `memorax-code start --clients codebuddy,workbuddy`. Explicit
+`start --clients` selects the full managed set; include any other integrations
+you want to retain. Each client has its own
+[configuration root and runtime](configuration.md#codebuddy-and-workbuddy-integration-paths).
+A leftover `.workbuddy` directory alone does not identify an installed app.
+On Windows, setup resolves the npm-installed `codebuddy.cmd` to CodeBuddy's
+Node entrypoint without invoking a command shell. If a discovered CodeBuddy
+CLI or WorkBuddy runtime cannot run, setup reports the preflight error and
+stops before changing client selection or starting integrations. Correct the
+runtime installation or configured command, then rerun setup. An integration
+explicitly disabled in `[clients]` does not block setup for other clients.
+After upgrading an older installation, rerun setup and refresh the affected
+client to load its new Hooks.
+
+`codebuddyHooks.status` is the shared adapter's status field inside the
+`codebuddyAdapter` or `workbuddyAdapter` report. `unverified` means its files
+are configured but that installation has not yet produced a real Hook event.
+Start a new CLI session or restart WorkBuddy, submit one prompt, and check
+status again. `observed` means its Hook entrypoint and shared runtime loaded;
+`invalid` means setup should be rerun.
 
 If WorkBuddy still reports a Hook command containing `/c/Users/...`, it is
 loading a stale plugin manifest. Rerun the start command above and fully

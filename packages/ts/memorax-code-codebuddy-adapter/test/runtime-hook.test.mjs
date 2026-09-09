@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { codeBuddyInstallPath, enableCodeBuddyAdapter } from "../src/config.mjs";
 
 const hookPath = fileURLToPath(new URL("../hooks/runtime-hook.mjs", import.meta.url));
 const manifestPath = fileURLToPath(new URL("../hooks/hooks.json", import.meta.url));
@@ -155,22 +156,116 @@ test("managed default WorkBuddy cwd is pinned through Stop and explicit workspac
     await mkdir(cwd, { recursive: true });
     await writeFile(join(userData, "app-config.json"), JSON.stringify({ defaultWorkspacePath: workspaceRoot }));
     await writeFile(transcriptPath, "");
+    const codeBuddyHome = join(root, "workbuddy");
+    await enableCodeBuddyAdapter({ client: "workbuddy", codeBuddyHome, memoraxCodeHome: root, codeBuddyCommand: "fixture-workbuddy" });
+    const hookEntry = join(codeBuddyInstallPath(codeBuddyHome), "hooks", "runtime-hook.mjs");
     const hookEnv = { WORKBUDDY_USER_DATA_DIR: userData };
     for (const explicitKind of [undefined, "local"]) {
       const sessionId = `default-${explicitKind ?? "detected"}`;
       const start = await runHook({
         hook_event_name: "UserPromptSubmit", session_id: sessionId, transcript_path: transcriptPath,
         prompt: "Prompt", cwd, ...(explicitKind ? { workspace_kind: explicitKind } : {}),
-      }, { root, server, hookEnv });
+      }, { root, server, hookEnv, hookEntry });
       assert.equal(start.status, 0, start.stderr);
       const stop = await runHook({
         hook_event_name: "Stop", session_id: sessionId, transcript_path: transcriptPath, cwd: root,
-      }, { root, server, hookEnv });
+      }, { root, server, hookEnv, hookEntry });
       assert.equal(stop.status, 0, stop.stderr);
       const turnRequests = requests.filter((request) => request.body?.sessionId === sessionId
         && ["/memory/turn-start", "/memory/writeback"].includes(request.path));
       assert.deepEqual(turnRequests.map((request) => request.body.workspaceKind), [explicitKind ?? "projectless", explicitKind ?? "projectless"]);
       assert.equal(turnRequests[1].body.cwd, cwd, "Stop preserves the accepted prompt workspace");
+    }
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installed clients isolate identical native identities and pin their selected homes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-client-identity-"));
+  const requests = [];
+  const server = await startServer(requests, { ok: true, scheduled: true });
+  const transcriptPath = join(root, "shared.jsonl");
+  const sessionId = "same-native-session";
+  await writeFile(transcriptPath, "");
+  const entries = {};
+  try {
+    for (const client of ["codebuddy", "workbuddy"]) {
+      const nativeHome = join(root, `native-${client}`);
+      await enableCodeBuddyAdapter({ client, codeBuddyHome: nativeHome, memoraxCodeHome: root, codeBuddyCommand: `fixture-${client}` });
+      entries[client] = join(codeBuddyInstallPath(nativeHome), "hooks", "runtime-hook.mjs");
+      const envFile = join(root, `${client}.env`);
+      await writeFile(envFile, "");
+      const options = { root, server, hookEntry: entries[client], hookEnv: { WORKBUDDY_HOME: "/incorrect/ambient/home", CODEBUDDY_ENV_FILE: envFile } };
+      const started = await runHook({ hook_event_name: "SessionStart", session_id: sessionId, transcript_path: transcriptPath, cwd: root }, options);
+      assert.equal(started.status, 0, started.stderr);
+      assert.match(await readFile(envFile, "utf8"), new RegExp(`TRACE_CLIENT='${client}'`));
+      const prompt = await runHook({ hook_event_name: "UserPromptSubmit", session_id: sessionId, transcript_path: transcriptPath, prompt: "same prompt", cwd: root }, options);
+      assert.equal(prompt.status, 0, prompt.stderr);
+      const observed = JSON.parse(await readFile(join(root, "adapters", client, "runtime-observed.json"), "utf8"));
+      assert.equal(observed.client, client);
+      assert.equal(observed.codeBuddyHome, nativeHome);
+    }
+    assert.deepEqual(requests.filter((request) => request.path === "/memory/turn-start").map((request) => request.body.client), ["codebuddy", "workbuddy"]);
+    const recoveryArgs = join(root, "recovery-args.json");
+    const lifecycle = join(root, "recover.mjs");
+    await writeFile(lifecycle, `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(recoveryArgs)}, JSON.stringify(process.argv.slice(2))); process.exit(1);`);
+    const recovery = await runHook({ hook_event_name: "SessionStart", session_id: sessionId, transcript_path: transcriptPath, cwd: root }, {
+      root, server, hookEntry: entries.workbuddy,
+      hookEnv: { MEMORAX_CODE_BACKEND_URL: "http://127.0.0.1:1", MEMORAX_CODE_CODEBUDDY_LIFECYCLE_COMMAND: lifecycle },
+    });
+    assert.equal(recovery.status, 0, recovery.stderr);
+    const args = JSON.parse(await readFile(recoveryArgs, "utf8"));
+    assert.equal(args.includes("--preserve-clients"), true);
+    assert.equal(args.includes("--clients"), false);
+    assert.equal(args[args.indexOf("--workbuddy-home") + 1], join(root, "native-workbuddy"));
+    const cliPending = await readFile(join(root, "adapters", "codebuddy", "pending.json"), "utf8");
+    const stopped = await runHook({ hook_event_name: "Stop", session_id: sessionId, transcript_path: transcriptPath, cwd: root }, { root, server, hookEntry: entries.workbuddy });
+    assert.equal(stopped.status, 0, stopped.stderr);
+    assert.equal(requests.at(-1).body.client, "workbuddy");
+    assert.equal(await readFile(join(root, "adapters", "codebuddy", "pending.json"), "utf8"), cliPending);
+    assert.deepEqual(JSON.parse(await readFile(join(root, "adapters", "workbuddy", "pending.json"), "utf8")), {});
+  } finally { await server.close(); }
+});
+
+test("Hooks without valid client metadata leave Backend and client state untouched", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-hook-authority-"));
+  const requests = [];
+  const server = await startServer(requests, { ok: true, scheduled: true });
+  try {
+    for (const [name, metadata] of [
+      ["missing", undefined],
+      ["malformed", "{"],
+      ["unsupported-version", JSON.stringify({ version: 2, client: "workbuddy" })],
+      ["unknown-client", JSON.stringify({ version: 1, client: "unknown" })],
+    ]) {
+      const home = join(root, name);
+      const nativeHome = join(home, "native-workbuddy");
+      await enableCodeBuddyAdapter({ client: "workbuddy", codeBuddyHome: nativeHome, memoraxCodeHome: home, codeBuddyCommand: "fixture-workbuddy" });
+      const pluginRoot = codeBuddyInstallPath(nativeHome);
+      const metadataPath = join(pluginRoot, ".memorax-code-package.json");
+      if (metadata === undefined) await rm(metadataPath);
+      else await writeFile(metadataPath, metadata);
+      const envFile = join(home, "session.env");
+      const preserved = new Map([[envFile, "export EXISTING_SESSION_VALUE='preserved'\n"]]);
+      for (const client of ["codebuddy", "workbuddy"]) {
+        const adapterDir = join(home, "adapters", client);
+        await mkdir(adapterDir, { recursive: true });
+        preserved.set(join(adapterDir, "pending.json"), '{"retained":{"sentinel":true}}\n');
+        preserved.set(join(adapterDir, "runtime-observed.json"), '{"sentinel":true}\n');
+      }
+      for (const [path, content] of preserved) await writeFile(path, content);
+      for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+        const result = await runHook({
+          hook_event_name: event, session_id: "retained", transcript_path: join(home, "session.jsonl"),
+          prompt: "do not dispatch without client identity", cwd: home,
+        }, { root: home, server, hookEntry: join(pluginRoot, "hooks", "runtime-hook.mjs"), hookEnv: { CODEBUDDY_ENV_FILE: envFile } });
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stdout, "", `${name}: ${event}`);
+        assert.deepEqual(requests, [], `${name}: ${event}`);
+        for (const [path, content] of preserved) assert.equal(await readFile(path, "utf8"), content, `${name}: ${event}: ${path}`);
+      }
     }
   } finally {
     await server.close();
@@ -359,17 +454,23 @@ async function startServer(requests, response) {
   return server;
 }
 
-async function runHook(input, { root, server, hookEnv = {}, pluginEnabled = true, mode }) {
+async function runHook(input, { root, server, hookEnv = {}, pluginEnabled = true, mode, hookEntry = hookPath }) {
   const address = server.address();
   const codeBuddyHome = join(root, "workbuddy");
+  if (hookEntry === hookPath) {
+    hookEntry = join(codeBuddyInstallPath(codeBuddyHome), "hooks", "runtime-hook.mjs");
+    try { await access(hookEntry); } catch {
+      await enableCodeBuddyAdapter({ client: "codebuddy", codeBuddyHome, memoraxCodeHome: root, codeBuddyCommand: "fixture-codebuddy" });
+    }
+  }
   if (pluginEnabled !== null) {
     await mkdir(codeBuddyHome, { recursive: true });
     await writeFile(join(codeBuddyHome, "settings.json"), JSON.stringify({
       enabledPlugins: { "memorax-code-codebuddy-adapter@memorax-code-local": pluginEnabled },
     }));
-  }
+  } else await rm(join(codeBuddyHome, "settings.json"), { force: true });
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [hookPath, mode ?? (input.hook_event_name === "UserPromptSubmit" ? "managed-user-prompt" : "turn")], {
+    const child = spawn(process.execPath, [hookEntry, mode ?? (input.hook_event_name === "UserPromptSubmit" ? "managed-user-prompt" : "turn")], {
       cwd: root,
       env: {
         ...process.env,

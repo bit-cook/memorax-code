@@ -84,8 +84,8 @@ test("reconcile leaves recovered Backend running when client setup failed", asyn
         stdout: JSON.stringify({
           ok: false,
           action: "start",
-          backend: { ok: true, reason: "trae_adapter_enable_failed_backend_recovered" },
-          traeAdapter: { ok: false, action: "enable", error: "EPERM: rename" },
+          backend: { ok: true, reason: "workbuddy_adapter_enable_failed_backend_recovered" },
+          workbuddyAdapter: { ok: false, action: "enable", error: "EPERM: rename" },
         }),
       };
     },

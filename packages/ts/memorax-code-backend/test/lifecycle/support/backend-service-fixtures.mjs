@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isProcessAlive } from "../../../dist/lifecycle/backend/service.js";
 import { managedServiceCommandLine, probeProcessCommandLine } from "../../../dist/lifecycle/backend/process.js";
@@ -33,7 +33,16 @@ export async function prepareClaudePluginCli(home) {
     outputDir: join(home, "fake-installed-claude-marketplace"),
   });
   const pluginInstallPath = installedMarketplace.pluginRoot;
-  const claudeCommand = join(home, "fake-claude.mjs");
+  const cliScript = process.platform === "win32"
+    ? join(home, "node_modules", "@anthropic-ai", "claude-code", "cli.js")
+    : join(home, "fake-claude.mjs");
+  const claudeCommand = process.platform === "win32" ? join(home, "claude.cmd") : cliScript;
+  await mkdir(dirname(cliScript), { recursive: true });
+  if (process.platform === "win32") {
+    // Exercise the launcher's trusted npm layout instead of bypassing it with an arbitrary script.
+    await writeFile(join(dirname(cliScript), "package.json"), '{"type":"module"}\n');
+    await writeFile(claudeCommand, '@echo off\r\nnode "%~dp0node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n');
+  }
   const callsPath = join(home, "claude-plugin-calls.jsonl");
   await mkdir(join(marketplacePath, ".claude-plugin"), { recursive: true });
   await writeFile(join(marketplacePath, ".claude-plugin", "marketplace.json"), "{}\n");
@@ -42,7 +51,7 @@ export async function prepareClaudePluginCli(home) {
     join(home, "lib", "memorax-code-claude-adapter", "skills", "memorax-code", "SKILL.md"),
     "---\nname: memorax-code\n---\n",
   );
-  await writeFile(claudeCommand, [
+  await writeFile(cliScript, [
     "#!/usr/bin/env node",
     "import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';",
     "import { join } from 'node:path';",
@@ -56,7 +65,7 @@ export async function prepareClaudePluginCli(home) {
     `if (args.join(' ') === 'plugin list --json') console.log(JSON.stringify([{ id: 'memorax-code-claude-adapter@memorax-code-local', enabled: true, version: ${JSON.stringify(pluginVersion)}, installPath: ${JSON.stringify(pluginInstallPath)} }]));`,
     "",
   ].join("\n"));
-  await chmod(claudeCommand, 0o755);
+  await chmod(cliScript, 0o755);
   return { callsPath, claudeCommand, marketplacePath, pluginInstallPath };
 }
 

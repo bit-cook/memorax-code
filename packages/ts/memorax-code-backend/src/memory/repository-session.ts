@@ -236,7 +236,7 @@ function isClientDefaultWorkspace(
 ): boolean {
   switch (client) {
     case "codex": return isCodexManagedTaskWorkspace(cwd, { env });
-    case "codebuddy": return resolveWorkBuddyWorkspaceKind({ cwd }, { env }) === "projectless";
+    case "workbuddy": return resolveWorkBuddyWorkspaceKind({ cwd }, { env }) === "projectless";
     case "opencode": return isOpenCodeDefaultWorkspace(cwd, { env });
     default: return false;
   }

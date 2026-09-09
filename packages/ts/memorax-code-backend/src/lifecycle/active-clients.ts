@@ -20,6 +20,7 @@ export function readActiveManagedClients(memoraxCodeHome: string): ManagedClient
       dsh: value.dsh === true,
       opencode: value.opencode === true,
       ...(value.codebuddy === true ? { codebuddy: true } : {}),
+      ...(typeof value.workbuddy === "boolean" ? { workbuddy: value.workbuddy } : {}),
       ...(value.trae === true ? { trae: true } : {}),
     };
   } catch {
@@ -32,7 +33,10 @@ export function writeActiveManagedClients(memoraxCodeHome: string, clients: Mana
   mkdirSync(dirname(path), { recursive: true });
   const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
   try {
-    writeFileSync(temporaryPath, `${JSON.stringify(clients, null, 2)}\n`, "utf8");
+    // An explicit new CLI selection must not look like the old WorkBuddy alias
+    // when a later Hook recovers the retained client set.
+    const record = { ...clients, ...(clients.codebuddy ? { workbuddy: clients.workbuddy === true } : {}) };
+    writeFileSync(temporaryPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
     renameSync(temporaryPath, path);
   } catch (error) {
     rmSync(temporaryPath, { force: true });

@@ -7,41 +7,46 @@ import {
 } from "./jsonl-history.js";
 import type { AutomaticMemoryWritebackRejectionReason } from "../../memory/automatic-writeback.js";
 import { createHarnessMemoryRuntime, type HarnessMemoryRuntimeOptions } from "../../memory/harness-runtime.js";
-import type { CodeBuddyTurnStartCommand, CodeBuddyWritebackCommand, MemoryHookTurnStartResult } from "../../memory/hook-command.js";
-import type { MemoryDiagnosticLogger } from "../../memory/observability.js";
+import type { CodeBuddyTurnStartCommand, CodeBuddyWritebackCommand, WorkBuddyTurnStartCommand, WorkBuddyWritebackCommand, MemoryHookTurnStartResult } from "../../memory/hook-command.js";
 import type { MemoryTurnCoordinator, MemoryTurnWritebackSkipReason } from "../../memory/turn-coordinator.js";
 import type { RepositoryMemoryScopeFailureReason } from "../../repository/scope.js";
 import { traceContextFromCodeBuddyHookBody, type TraceContext } from "../../trace/context.js";
 import {
-  markCurrentCodeBuddyTurnOutcome,
+  markCurrentTraceTurnOutcome,
   readOpenTraceTurn,
-  recordCodeBuddyTraceEvent,
+  recordTraceEvent,
   traceTurnEventId,
   type TraceEventWriteResult,
 } from "../../trace/store.js";
 
+type NativeTurnStartCommand = CodeBuddyTurnStartCommand | WorkBuddyTurnStartCommand;
+type NativeWritebackCommand = CodeBuddyWritebackCommand | WorkBuddyWritebackCommand;
+
 type Options = HarnessMemoryRuntimeOptions & {
+  client?: "codebuddy" | "workbuddy";
   transcriptReadAttempts?: number;
   transcriptRetryDelayMs?: number;
 };
 type SkipReason = "missing_session_id" | "turn_id_missing" | "non_materialized_session" | "config_missing" | CodeBuddyTurnFailureReason | RepositoryMemoryScopeFailureReason | AutomaticMemoryWritebackRejectionReason | MemoryTurnWritebackSkipReason;
 export type CodeBuddyMemoryHookWritebackResult = { ok: true; scheduled: true } | { ok: true; scheduled: false; reason: SkipReason };
-export type CodeBuddyMemoryHookRuntime = { recordTurnStart(command: CodeBuddyTurnStartCommand): Promise<MemoryHookTurnStartResult>; writeback(command: CodeBuddyWritebackCommand): Promise<CodeBuddyMemoryHookWritebackResult>; size(): number; close(): void };
+export type CodeBuddyMemoryHookRuntime = { recordTurnStart(command: NativeTurnStartCommand): Promise<MemoryHookTurnStartResult>; writeback(command: NativeWritebackCommand): Promise<CodeBuddyMemoryHookWritebackResult>; size(): number; close(): void };
 
 export function createCodeBuddyMemoryHookRuntime(options: Options = {}): CodeBuddyMemoryHookRuntime {
+  const client = options.client ?? "codebuddy";
   const now = options.now ?? (() => Date.now());
   const memory = createHarnessMemoryRuntime({
-    client: "codebuddy",
-    retrievalSource: "codebuddy_hook_retrieval",
-    writebackSource: "codebuddy_hook_writeback",
-    diagnosticPrefix: "codebuddy_memory_hook",
-    traceFailureEvent: "codebuddy_trace.write_failed",
-    turnStartTraceSource: "codebuddy-hook",
+    client,
+    retrievalSource: `${client}_hook_retrieval`,
+    writebackSource: `${client}_hook_writeback`,
+    diagnosticPrefix: `${client}_memory_hook`,
+    traceFailureEvent: `${client}_trace.write_failed`,
+    turnStartTraceSource: `${client}-hook`,
     deduplicateRetrieval: false,
   }, options);
   const coordinator = memory.turnCoordinator;
   return {
     async recordTurnStart(command) {
+      if (command.client !== client) throw new Error("memory Hook client mismatch");
       // Interrupted turns may never emit Stop. Reconcile before the new turn
       // replaces the session's current trace identity.
       await reconcilePreviousInterruptedTurn(coordinator, command, options, now);
@@ -59,7 +64,8 @@ export function createCodeBuddyMemoryHookRuntime(options: Options = {}): CodeBud
       });
     },
     async writeback(command) {
-      const entry = coordinator.getTurn({ client: "codebuddy", sessionId: command.sessionId, clientTurnId: command.turnId });
+      if (command.client !== client) throw new Error("memory Hook client mismatch");
+      const entry = coordinator.getTurn({ client, sessionId: command.sessionId, clientTurnId: command.turnId });
       if (!command.sessionId) return { ok: true, scheduled: false, reason: "missing_session_id" };
       if (!command.turnId) return { ok: true, scheduled: false, reason: "turn_id_missing" };
       if (entry?.transcriptPath && entry.transcriptPath !== command.transcriptPath) {
@@ -104,7 +110,7 @@ async function readWithRetry(input: { transcriptPath: string; sessionId: string;
 }
 
 function traceContextForWriteback(
-  command: CodeBuddyWritebackCommand,
+  command: NativeWritebackCommand,
   entry: { traceContext?: TraceContext; cwd?: string; workspaceKind?: string } | undefined,
 ): TraceContext | undefined {
   return traceContextFromCodeBuddyHookBody({
@@ -120,14 +126,15 @@ async function recordCodeBuddyTurnEnd(
   turn?: CodeBuddyTurn,
   failureReason?: CodeBuddyTurnFailureReason,
 ): Promise<TraceEventWriteResult | undefined> {
+  const client = options.client ?? "codebuddy";
   const outcome = turn ? "completed" : failureReason === "assistant_message_missing" ? "interrupted" : undefined;
-  const recorded = await recordTraceBestEffort("codebuddy_memory_hook.turn_end_event", recordCodeBuddyTraceEvent({
+  const recorded = await recordTraceBestEffort(`${client}_memory_hook.turn_end_event`, recordTraceEvent({
     eventId: traceTurnEventId(traceContext, "turn_end"),
     memoraxCodeHome: options.memoraxCodeHome,
     env: options.env,
     traceContext,
     type: "turn_end",
-    source: turn ? "codebuddy-hook" : "codebuddy-transcript",
+    source: turn ? `${client}-hook` : `${client}-transcript`,
     operation: "reply",
     ok: Boolean(turn),
     ...(outcome ? { outcome } : {}),
@@ -139,13 +146,13 @@ async function recordCodeBuddyTurnEnd(
     } : {
       error: failureReason,
     }),
-  }), options.diagnosticLogger);
+  }), options);
   if (outcome) {
-    await recordTraceBestEffort("codebuddy_memory_hook.current_turn_close", markCurrentCodeBuddyTurnOutcome(
+    await recordTraceBestEffort(`${client}_memory_hook.current_turn_close`, markCurrentTraceTurnOutcome(
       traceContext,
       outcome,
       { memoraxCodeHome: options.memoraxCodeHome, env: options.env },
-    ), options.diagnosticLogger);
+    ), options);
   }
   return recorded;
 }
@@ -155,15 +162,16 @@ async function recordCodeBuddyTurnMaterialization(
   traceContext: TraceContext | undefined,
   turn: CodeBuddyTurn,
 ): Promise<void> {
+  const client = options.client ?? "codebuddy";
   const originalEventId = traceTurnEventId(traceContext, "turn_end");
   if (!originalEventId) return;
-  await recordTraceBestEffort("codebuddy_memory_hook.turn_materialized_event", recordCodeBuddyTraceEvent({
+  await recordTraceBestEffort(`${client}_memory_hook.turn_materialized_event`, recordTraceEvent({
     eventId: traceTurnEventId(traceContext, "turn_materialized"),
     memoraxCodeHome: options.memoraxCodeHome,
     env: options.env,
     traceContext,
     type: "turn_materialized",
-    source: "codebuddy-transcript",
+    source: `${client}-transcript`,
     operation: "reply",
     ok: true,
     outcome: "completed",
@@ -171,15 +179,16 @@ async function recordCodeBuddyTurnMaterialization(
     sessionTurnIndex: turn.sessionTurnIndex,
     request: { original_event_id: originalEventId, prompt: turn.userPrompt },
     response: { assistantMessage: turn.assistantReply },
-  }), options.diagnosticLogger);
+  }), options);
 }
 
 async function reconcilePreviousInterruptedTurn(
   coordinator: MemoryTurnCoordinator,
-  currentTurn: CodeBuddyTurnStartCommand,
+  currentTurn: NativeTurnStartCommand,
   options: Options,
   now: () => number,
 ): Promise<void> {
+  const client = options.client ?? "codebuddy";
   const candidate = await previousInterruptedTurnCandidate(coordinator, currentTurn, options, now);
   if (!candidate) return;
   // Trace and cached metadata only locate the candidate; the native transcript
@@ -192,11 +201,11 @@ async function reconcilePreviousInterruptedTurn(
   if (!transcript.ok) return;
   await recordCodeBuddyInterruptedTurnEnd(options, candidate.traceContext, transcript.turn);
   coordinator.discardTurn({
-    client: "codebuddy",
+    client,
     sessionId: candidate.sessionId,
     clientTurnId: candidate.turnId,
   }, "interrupted");
-  options.diagnosticLogger?.("codebuddy_memory_hook.interrupted_turn_reconciled", {
+  options.diagnosticLogger?.(`${client}_memory_hook.interrupted_turn_reconciled`, {
     sessionId: candidate.sessionId,
     turnId: candidate.turnId,
     assistantChars: transcript.turn.assistantReply.length,
@@ -214,12 +223,13 @@ type CodeBuddyInterruptedTurnCandidate = Readonly<{
 
 async function previousInterruptedTurnCandidate(
   coordinator: MemoryTurnCoordinator,
-  currentTurn: CodeBuddyTurnStartCommand,
+  currentTurn: NativeTurnStartCommand,
   options: Options,
   now: () => number,
 ): Promise<CodeBuddyInterruptedTurnCandidate | undefined> {
+  const client = options.client ?? "codebuddy";
   const open = await readOpenTraceTurn({
-    client: "codebuddy",
+    client,
     memoraxCodeHome: options.memoraxCodeHome,
     env: options.env,
     expectedSessionId: currentTurn.sessionId,
@@ -229,7 +239,7 @@ async function previousInterruptedTurnCandidate(
   if (!open.ok && open.reason === "closed") return undefined;
   if (open.ok && open.traceContext.turnId && open.traceContext.turnId !== currentTurn.turnId) {
     const turnId = open.traceContext.turnId;
-    const cached = coordinator.getTurn({ client: "codebuddy", sessionId: currentTurn.sessionId, clientTurnId: turnId });
+    const cached = coordinator.getTurn({ client, sessionId: currentTurn.sessionId, clientTurnId: turnId });
     return {
       sessionId: currentTurn.sessionId,
       turnId,
@@ -240,13 +250,14 @@ async function previousInterruptedTurnCandidate(
     };
   }
   const cached = coordinator.latestTurn({
-    client: "codebuddy",
+    client,
     sessionId: currentTurn.sessionId,
     excludeClientTurnId: currentTurn.turnId,
   });
   if (!cached) return undefined;
   const transcriptPath = cached.transcriptPath ?? currentTurn.transcriptPath;
   const traceContext = cached.traceContext ?? traceContextFromCodeBuddyHookBody({
+    client,
     sessionId: cached.sessionId,
     turnId: cached.clientTurnId,
     cwd: cached.cwd,
@@ -267,15 +278,16 @@ async function recordCodeBuddyInterruptedTurnEnd(
   traceContext: TraceContext,
   turn: CodeBuddyInterruptedTurn,
 ): Promise<void> {
+  const client = options.client ?? "codebuddy";
   await recordTraceBestEffort(
-    "codebuddy_memory_hook.interrupted_turn_end_event",
-    recordCodeBuddyTraceEvent({
+    `${client}_memory_hook.interrupted_turn_end_event`,
+    recordTraceEvent({
       eventId: traceTurnEventId(traceContext, "turn_end"),
       memoraxCodeHome: options.memoraxCodeHome,
       env: options.env,
       traceContext,
       type: "turn_end",
-      source: "codebuddy-transcript",
+      source: `${client}-transcript`,
       operation: "reply",
       ok: true,
       outcome: "interrupted",
@@ -284,28 +296,28 @@ async function recordCodeBuddyInterruptedTurnEnd(
       request: { prompt: turn.userPrompt },
       response: { assistantMessage: turn.assistantReply },
     }),
-    options.diagnosticLogger,
+    options,
   );
   // Closing operational state must not depend on retaining its trace event.
   await recordTraceBestEffort(
-    "codebuddy_memory_hook.interrupted_current_turn_close",
-    markCurrentCodeBuddyTurnOutcome(traceContext, "interrupted", {
+    `${client}_memory_hook.interrupted_current_turn_close`,
+    markCurrentTraceTurnOutcome(traceContext, "interrupted", {
       memoraxCodeHome: options.memoraxCodeHome,
       env: options.env,
     }),
-    options.diagnosticLogger,
+    options,
   );
 }
 
 async function recordTraceBestEffort<T>(
   label: string,
   promise: Promise<T>,
-  diagnosticLogger?: MemoryDiagnosticLogger,
+  options: Options,
 ): Promise<T | undefined> {
   try {
     return await promise;
   } catch (error) {
-    diagnosticLogger?.("codebuddy_trace.write_failed", {
+    options.diagnosticLogger?.(`${options.client ?? "codebuddy"}_trace.write_failed`, {
       label,
       error: error instanceof Error ? error.message : String(error),
     });

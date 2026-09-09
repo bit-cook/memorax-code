@@ -64,6 +64,56 @@ test("Windows DSH npm shim resolves the official Node entrypoint", () => {
   });
 });
 
+test("Windows CodeBuddy npm shims resolve official global and local Node entrypoints", () => {
+  const root = "C:\\MemoraX Code 中文";
+  const cli = `${root}\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy`;
+  const args = ["-p", "hello 中文 & preserve spaces"];
+  for (const resolve of [resolveWindowsCliInvocation, resolveAdapterCommonCliInvocation]) {
+    for (const shim of [`${root}\\codebuddy.cmd`, `${root}\\node_modules\\.bin\\CodeBuddy.CMD`]) {
+      assert.deepEqual(resolve("codebuddy", args, {
+        platform: "win32",
+        whereOutput: `${shim.replace(/\.cmd$/i, "")}\r\n${shim}\r\n`,
+        nodePath: "C:\\Program Files\\nodejs\\node.exe",
+        env: {},
+        existsSync: (candidate) => candidate === cli,
+      }), {
+        command: "C:\\Program Files\\nodejs\\node.exe",
+        args: [cli, ...args],
+      });
+    }
+  }
+});
+
+test("Windows CodeBuddy npm shims fail closed when their official entrypoint is missing", () => {
+  for (const resolve of [resolveWindowsCliInvocation, resolveAdapterCommonCliInvocation]) {
+    assert.throws(() => resolve("codebuddy", ["--version"], {
+      platform: "win32",
+      resolvedCommand: "C:\\npm\\codebuddy.cmd",
+      env: { MEMORAX_CODE_CODEX_CLI_JS: "C:\\npm\\unrelated.js" },
+      existsSync: (candidate) => candidate === "C:\\npm\\unrelated.js",
+    }), (error) => {
+      assert.match(error.message, /refusing to execute codebuddy\.cmd.*MEMORAX_CODE_CODEBUDDY_COMMAND/);
+      assert.doesNotMatch(error.message, /CODEX/);
+      return true;
+    });
+  }
+});
+
+test("unknown Windows shims remain rejected without unrelated client guidance", () => {
+  for (const resolve of [resolveWindowsCliInvocation, resolveAdapterCommonCliInvocation]) {
+    assert.throws(() => resolve("unknown", [], {
+      platform: "win32",
+      resolvedCommand: "C:\\npm\\unknown.cmd",
+      env: {},
+      existsSync: () => true,
+    }), (error) => {
+      assert.match(error.message, /refusing to execute unknown\.cmd through a command shell/);
+      assert.doesNotMatch(error.message, /CODEX|CLAUDE|CODEBUDDY/);
+      return true;
+    });
+  }
+});
+
 test("Windows WorkBuddy bare script resolves through Node without a shell", () => {
   const cli = "C:\\Users\\tester\\AppData\\Local\\Programs\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy";
   const options = {

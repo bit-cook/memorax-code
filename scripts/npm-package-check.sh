@@ -8,6 +8,9 @@ unset \
   CLAUDE_CONFIG_DIR \
   CLAUDE_HOME \
   OPENCODE_CONFIG_DIR \
+  CODEBUDDY_HOME \
+  CODEBUDDY_CONFIG_DIR \
+  WORKBUDDY_HOME \
   TRAE_CN_HOME \
   TRAE_HOME
 
@@ -43,6 +46,8 @@ scripts/build-npm-packages.sh "$out_dir"
   CLAUDE_CONFIG_DIR="$isolated_test_home/.claude" \
   CLAUDE_HOME="$isolated_test_home/.claude" \
   OPENCODE_CONFIG_DIR="$isolated_test_home/.config/opencode" \
+  CODEBUDDY_HOME="$isolated_test_home/.codebuddy" \
+  WORKBUDDY_HOME="$isolated_test_home/.workbuddy" \
   TRAE_CN_HOME="$isolated_test_home/.trae-cn" \
     make test-npm-package
 )
@@ -239,6 +244,8 @@ export DSH_HOME="$home_dir/.dsh-memorax-code-package-check"
 export CLAUDE_CONFIG_DIR="$home_dir/.claude-memorax-code-package-check"
 export CLAUDE_HOME="$CLAUDE_CONFIG_DIR"
 export OPENCODE_CONFIG_DIR="$home_dir/.config/opencode-memorax-code-package-check"
+export CODEBUDDY_HOME="$home_dir/.codebuddy-memorax-code-package-check"
+export WORKBUDDY_HOME="$home_dir/.workbuddy-memorax-code-package-check"
 export TRAE_CN_HOME="$home_dir/.trae-cn-memorax-code-package-check"
 package_install_port="$(node -e 'const net = require("node:net"); const server = net.createServer(); server.listen(0, "127.0.0.1", () => { console.log(server.address().port); server.close(); });')"
 export MEMORAX_CODE_BACKEND_PORT="$package_install_port"
@@ -251,6 +258,8 @@ for unexpected in \
   "$DSH_HOME" \
   "$CLAUDE_CONFIG_DIR" \
   "$OPENCODE_CONFIG_DIR" \
+  "$CODEBUDDY_HOME" \
+  "$WORKBUDDY_HOME" \
   "$TRAE_CN_HOME" \
   "$MEMORAX_CODE_HOME/config.toml" \
   "$MEMORAX_CODE_HOME/runtime/setup/setup-completion.json" \
@@ -303,6 +312,8 @@ printf '%s\n' 'package-check-user' 'package-check-key' | \
   MEMORAX_CODE_SKIP_CODEX_PLUGIN_INSTALL=1 \
   MEMORAX_CODE_SKIP_CLAUDE_ADAPTER_INSTALL=1 \
   MEMORAX_CODE_SKIP_OPENCODE_ADAPTER_INSTALL=1 \
+  MEMORAX_CODE_SKIP_CODEBUDDY_ADAPTER_INSTALL=1 \
+  MEMORAX_CODE_SKIP_WORKBUDDY_ADAPTER_INSTALL=1 \
   MEMORAX_CODE_SKIP_TRAE_ADAPTER_INSTALL=1 \
   "$prefix/bin/memorax-code" setup --existing-account \
     >"$home_dir/setup.stdout" 2>"$home_dir/setup.stderr"
@@ -345,6 +356,7 @@ assert config_sections == {
     "trace.claude",
     "trace.codex",
     "trace.codebuddy",
+    "trace.workbuddy",
     "trace.dsh",
     "trace.opencode",
     "trace.trae",
@@ -356,6 +368,8 @@ assert "codex = false" in config_text
 assert "claude = false" in config_text
 assert "dsh = false" in config_text
 assert "opencode = false" in config_text
+assert "codebuddy = false" in config_text
+assert "workbuddy = false" in config_text
 assert "trae = false" in config_text
 assert memorax_code_config.stat().st_mode & 0o777 == 0o600
 completion = json.loads((home / ".memorax-code" / "runtime" / "setup" / "setup-completion.json").read_text())
@@ -384,6 +398,8 @@ MEMORAX_CODE_SETUP_ASSUME_INTERACTIVE=1 \
 MEMORAX_CODE_SKIP_CODEX_PLUGIN_INSTALL=1 \
 MEMORAX_CODE_SKIP_CLAUDE_ADAPTER_INSTALL=1 \
 MEMORAX_CODE_SKIP_OPENCODE_ADAPTER_INSTALL=1 \
+MEMORAX_CODE_SKIP_CODEBUDDY_ADAPTER_INSTALL=1 \
+MEMORAX_CODE_SKIP_WORKBUDDY_ADAPTER_INSTALL=1 \
 MEMORAX_CODE_SKIP_TRAE_ADAPTER_INSTALL=1 \
 "$prefix/bin/memorax-code" >/dev/null 2>&1
 cmp "$home_dir/legacy-config-before-migration.toml" "$MEMORAX_CODE_HOME/config.toml"

@@ -1,12 +1,12 @@
 # @memorax/memorax-code
 
 MemoraX Code adds persistent coding memory to Codex, Claude Code,
-CodeBuddy/WorkBuddy, DeepSeek Harness, OpenCode, and Trae.
+CodeBuddy CLI, WorkBuddy, DeepSeek Harness, OpenCode, and Trae.
 
 ## Requirements
 
 - Node.js 20 or newer (Node.js 24 LTS recommended) and npm.
-- At least one of Codex, Claude Code, CodeBuddy/WorkBuddy, DeepSeek Harness,
+- At least one of Codex, Claude Code, CodeBuddy CLI, WorkBuddy, DeepSeek Harness,
   OpenCode Desktop or CLI, or Trae.
 
 ## Install

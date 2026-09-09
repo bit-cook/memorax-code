@@ -99,6 +99,13 @@ export function createMemoryService(options: MemoryServiceOptions = {}): MemoryS
     repositoryMemorySession,
     turnCoordinator,
   });
+  const workBuddyHook = createCodeBuddyMemoryHookRuntime({
+    ...options,
+    client: "workbuddy",
+    pendingQuotaNotice,
+    repositoryMemorySession,
+    turnCoordinator,
+  });
   const traeHook = createTraeMemoryHookRuntime({
     ...options,
     pendingQuotaNotice,
@@ -119,6 +126,8 @@ export function createMemoryService(options: MemoryServiceOptions = {}): MemoryS
           return await dshHook.recordTurnStart(command);
         case "codebuddy":
           return await codeBuddyHook.recordTurnStart(command);
+        case "workbuddy":
+          return await workBuddyHook.recordTurnStart(command);
         case "trae":
           return await traeHook.recordTurnStart(command);
       }
@@ -136,6 +145,8 @@ export function createMemoryService(options: MemoryServiceOptions = {}): MemoryS
           return await dshHook.writeback(command);
         case "codebuddy":
           return await codeBuddyHook.writeback(command);
+        case "workbuddy":
+          return await workBuddyHook.writeback(command);
         case "trae":
           return await traeHook.writeback(command);
       }
@@ -152,6 +163,7 @@ export function createMemoryService(options: MemoryServiceOptions = {}): MemoryS
       openCodeHook.close();
       dshHook.close();
       codeBuddyHook.close();
+      workBuddyHook.close();
       traeHook.close();
       turnCoordinator.close();
       repositoryMemorySession.close();

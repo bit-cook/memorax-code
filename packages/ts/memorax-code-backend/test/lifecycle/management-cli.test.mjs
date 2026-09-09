@@ -572,6 +572,7 @@ test("client Hook recovery preserves managed integrations and respects explicit 
           assert.equal(report.claudeAdapter.enabled, phase !== "stopped", phase);
           assert.deepEqual(JSON.parse(await readFile(activeClientsPath, "utf8")), {
             codex: false, claude: phase !== "stopped", dsh: false, opencode: false, [client]: true,
+            ...(client === "codebuddy" ? { workbuddy: false } : {}),
           }, phase);
         }
       } finally {
