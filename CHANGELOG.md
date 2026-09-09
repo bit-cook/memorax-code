@@ -6,6 +6,30 @@ behavior.
 
 ## Unreleased
 
+## [0.1.15] - 2026-09-09
+
+### Added
+
+- Shared Coding Memory across recognized default chats in Codex, WorkBuddy,
+  and OpenCode under `<base-user-id>@General`, while retaining the existing
+  scope rules for ordinary workspaces and Git repositories.
+
+### Fixed
+
+- Preserved default-chat memory scope when Codex sessions resume from nested
+  directories after Backend restarts, and kept CodeBuddy/WorkBuddy CLI memory
+  operations associated with the native session.
+- Validated the working directory before reusing a General scope without a
+  workspace, and allowed the first verified default workspace to complete that
+  scope without losing the current Turn's writeback.
+- Allowed device-identity lookup up to five seconds during guest setup,
+  preventing valid but slower Windows registry queries from timing out.
+
+### Upgrade note
+
+Existing memories under previous default-chat names are not migrated or
+searched alongside `General`.
+
 ## [0.1.14] - 2026-09-07
 
 ### Added
@@ -241,6 +265,7 @@ Later upgrades do not require this workaround.
 - Required a non-empty MemoraX user ID and API key during interactive setup,
   with clearer registration guidance.
 
+[0.1.15]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.15
 [0.1.14]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.14
 [0.1.10]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.10
 [0.1.9]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.9
