@@ -205,10 +205,11 @@ async function startMemoraxCodeServiceLocked(
     return { ok: false, action: "start", backend: serviceStateFailure };
   }
   const packageReplacement = isPackageReplacement();
+  const preserveClients = packageReplacement || argv.includes("--preserve-clients");
   // Active client intent must not bypass strict lifecycle config validation.
-  if (packageReplacement) loadManagedClientsConfig(memoraxCodeHome);
+  if (preserveClients) loadManagedClientsConfig(memoraxCodeHome);
   const requestedClients = managedClientsFor(argv, serviceOptions, {
-    preferActive: packageReplacement,
+    preferActive: preserveClients,
   });
   const clients = isDshAdapterRecovery()
     ? { ...requestedClients, dsh: true }

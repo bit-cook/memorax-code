@@ -298,6 +298,12 @@ readiness must not replace the authoritative generation. Cross-process
 lifecycle decisions use versioned durable records and bounded locks, not only
 in-memory serialization.
 
+Concurrent shared Hook recovery is serialized per Backend home and rechecks
+connection authority and health before starting another Backend. Recovery
+preserves the current managed client set, falling back to configured selection
+when no valid active marker is available; the triggering client does not narrow the
+shared integration set.
+
 Control-plane implementations are grouped by ownership:
 
 - [npm package](packages/npm/memorax-code) `bin` and `lib` own installed

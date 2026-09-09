@@ -270,6 +270,7 @@ test("managed plugin starts the Backend once and bounds prompt waiting", async (
       "--opencode-config-dir", openCodeConfigDir,
       "--host", "127.0.0.1",
       "--port", "9",
+      "--preserve-clients",
     ]]);
     const prompt = async (id) => {
       const output = promptOutput(id, id);

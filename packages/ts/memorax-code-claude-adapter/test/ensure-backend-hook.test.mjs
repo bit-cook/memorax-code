@@ -55,6 +55,7 @@ test("unhealthy backend restores the persisted shared client selection", async (
       "127.0.0.1",
       "--port",
       "9",
+      "--preserve-clients",
     ]]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -111,6 +112,7 @@ test("unhealthy Backend recovery preserves the persisted host and port", async (
       "--claude-home", claudeHome,
       "--host", "127.0.0.1",
       "--port", "9",
+      "--preserve-clients",
     ]]);
   } finally {
     await rm(root, { recursive: true, force: true });
