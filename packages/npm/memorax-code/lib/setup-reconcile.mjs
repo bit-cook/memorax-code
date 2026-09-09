@@ -10,8 +10,8 @@ export async function reconcileSetup({
   let recovered = false;
 
   if (!commandSucceeded(started)) {
-    await onEvent({ type: "start-failed", attempt: 1 });
-    const deterministicFailure = classifyDeterministicStartFailure(started);
+    const deterministicFailure = classifyStartFailure(started);
+    await onEvent({ type: "start-failed", attempt: 1, reason: deterministicFailure?.reason });
     if (deterministicFailure) {
       return await complete(onEvent, deterministicFailure);
     }
@@ -21,7 +21,9 @@ export async function reconcileSetup({
     await onEvent({ type: "start", attempt: 2 });
     started = await start();
     if (!commandSucceeded(started)) {
-      await onEvent({ type: "start-failed", attempt: 2 });
+      const deterministicFailure = classifyStartFailure(started);
+      await onEvent({ type: "start-failed", attempt: 2, reason: deterministicFailure?.reason });
+      if (deterministicFailure) return await complete(onEvent, deterministicFailure);
       await onEvent({ type: "diagnostic-status" });
       await status();
       return await complete(onEvent, compactResult({
@@ -77,7 +79,24 @@ export function clientHookRuntimeActivationFailed(result) {
   return /client Hook runtime activation failed:/i.test(output);
 }
 
-function classifyDeterministicStartFailure(result) {
+export function startLifecycleReport(result) {
+  try {
+    const report = JSON.parse(result.stdout ?? "");
+    if (report?.action !== "start" || typeof report.ok !== "boolean") return undefined;
+    if (report.backend !== undefined && typeof report.backend?.ok !== "boolean") return undefined;
+    return report;
+  } catch {}
+  return undefined;
+}
+
+export function failedLifecycleAdapters(report) {
+  return ["codex", "claude", "dsh", "opencode", "codebuddy", "trae"].flatMap((client) => {
+    const adapter = report?.[`${client}Adapter`];
+    return adapter?.ok === false ? [{ ...adapter, client }] : [];
+  });
+}
+
+function classifyStartFailure(result) {
   if (clientHookRuntimeActivationFailed(result)) {
     return {
       status: "not-verified",
@@ -103,6 +122,15 @@ function classifyDeterministicStartFailure(result) {
     };
   }
 
+  const report = startLifecycleReport(result);
+  // A failed integration can follow a successful Backend recovery. Do not
+  // restart all selected clients again, or treat incomplete setup as ready.
+  if (report?.ok === false && report.backend?.ok === true && report.backend.skipped !== true) {
+    const adapters = failedLifecycleAdapters(report);
+    if (adapters.length > 0) {
+      return { status: "not-verified", reason: "adapter-setup-failed" };
+    }
+  }
   return undefined;
 }
 

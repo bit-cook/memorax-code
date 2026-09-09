@@ -1,7 +1,9 @@
 import { strict as assert } from "node:assert";
+import fs from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { basename, join, win32 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import { withJsonFileLockAsync } from "../../memorax-code-adapter-common/src/config-utils.mjs";
@@ -245,6 +247,69 @@ test("Trae runtime generations track recovery metadata without mutating previous
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("Trae directory publication retries Windows contention and reports exhausted failures", async () => {
+  const fixture = await createFixture("directory-contention");
+  const options = { ...fixture.options, platform: process.platform };
+  const skillPath = join(fixture.traeHome, "skills", "memorax-code");
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalRename = fs.renameSync;
+  const originalRemove = fs.rmSync;
+  const publishError = Object.assign(new Error("directory publication denied"), { code: "EPERM" });
+  let persistent = false;
+  let runtimeRenames = 0;
+  let skillRenames = 0;
+  let skillRemovals = 0;
+  fs.renameSync = (source, destination) => {
+    if (basename(source).startsWith(".staging-") && ++runtimeRenames === 1) throw publishError;
+    if (destination === skillPath && (++skillRenames === 1 || persistent)) throw publishError;
+    return originalRename(source, destination);
+  };
+  fs.rmSync = (target, ...args) => {
+    if (target === skillPath && ++skillRemovals === 1) {
+      throw Object.assign(new Error("directory removal busy"), { code: "EBUSY" });
+    }
+    if (persistent && target.startsWith(`${skillPath}.tmp-`) && fs.existsSync(target)) {
+      throw Object.assign(new Error("stage cleanup failed"), { code: "EIO" });
+    }
+    return originalRemove(target, ...args);
+  };
+  Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+  syncBuiltinESMExports();
+  try {
+    const installed = await enableTraeAdapter(options);
+    assert.equal(installed.ok, true, installed.error);
+    assert.equal(await readFile(join(skillPath, "SKILL.md"), "utf8"), "# MemoraX Code\n");
+    assert.deepEqual([runtimeRenames, skillRenames, skillRemovals], [2, 2, 2]);
+    assert.equal((await enableTraeAdapter(options)).changed, false);
+    assert.deepEqual([runtimeRenames, skillRenames, skillRemovals], [2, 2, 2]);
+
+    await writeFile(join(options.skillSourcePath, "SKILL.md"), "# Updated Skill\n");
+    persistent = true;
+    const failed = await enableTraeAdapter(options);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.action, "enable");
+    assert.equal(failed.reason, "install_failed");
+    assert.equal(failed.stage, "skill-publish");
+    assert.equal(failed.errorCode, "EPERM");
+    assert.equal(failed.error, publishError.message);
+    assert.equal(skillRenames, 7, "persistent contention must stop after the bounded retries");
+    assert.equal((await readTraeAdapterStatus(options)).reason, "install_incomplete");
+    const state = JSON.parse(await readFile(installed.statePath, "utf8"));
+    assert.equal(state.enabled, false);
+    assert.equal(state.installPending, true);
+
+    persistent = false;
+    assert.equal((await enableTraeAdapter(options)).ok, true);
+    assert.equal(await readFile(join(skillPath, "SKILL.md"), "utf8"), "# Updated Skill\n");
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    fs.renameSync = originalRename;
+    fs.rmSync = originalRemove;
+    syncBuiltinESMExports();
     await rm(fixture.root, { recursive: true, force: true });
   }
 });

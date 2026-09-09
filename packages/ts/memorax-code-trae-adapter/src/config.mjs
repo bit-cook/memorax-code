@@ -21,6 +21,7 @@ import {
   withJsonFileLock,
   withJsonFileLockAsync,
 } from "../../memorax-code-adapter-common/src/config-utils.mjs";
+import { withWindowsDirectoryRetry } from "../../memorax-code-adapter-common/src/windows-directory-retry.mjs";
 import {
   defaultMemoraxCodeHome,
   defaultTraeHome,
@@ -127,7 +128,7 @@ async function enableTraeAdapterUnlocked(paths, options) {
     updateManagedHooks(paths.hooksPath, hookCommand, true);
     atomicWriteJson(paths.statePath, state);
   } catch (error) {
-    return failure("install_failed", paths, error);
+    return failure("install_failed", paths, error, "enable");
   }
 
   return await readTraeAdapterStatusUnlocked(paths, { ...options, changed: !current });
@@ -443,6 +444,7 @@ function materializeRuntimeGeneration(paths, generationPath, runtimeDigest, runt
   }
   mkdirSync(paths.runtimeRoot, { recursive: true, mode: 0o700 });
   const temporaryPath = join(paths.runtimeRoot, `.staging-${process.pid}-${randomUUID()}`);
+  let stage = "runtime-stage";
   try {
     mkdirSync(join(temporaryPath, "hooks"), { recursive: true, mode: 0o700 });
     mkdirSync(join(temporaryPath, "src"), { recursive: true, mode: 0o700 });
@@ -454,10 +456,18 @@ function materializeRuntimeGeneration(paths, generationPath, runtimeDigest, runt
       ...runtimeMetadata,
       runtimeDigest,
     });
-    renameSync(temporaryPath, generationPath);
+    stage = "runtime-publish";
+    withWindowsDirectoryRetry(() => renameSync(temporaryPath, generationPath));
   } catch (error) {
-    rmSync(temporaryPath, { recursive: true, force: true });
-    if (!existsSync(generationPath)) throw error;
+    try {
+      withWindowsDirectoryRetry(() => rmSync(temporaryPath, { recursive: true, force: true }));
+    } catch {
+      // Preserve the publication failure if Windows also blocks stage cleanup.
+    }
+    if (!existsSync(generationPath)) {
+      error.stage = stage;
+      throw error;
+    }
   }
 }
 
@@ -539,17 +549,25 @@ function windowsExecutableToken(path) {
 function materializeDirectory(source, destination, memoraxCodeCommand) {
   mkdirSync(dirname(destination), { recursive: true });
   const temporaryPath = `${destination}.tmp-${process.pid}-${randomUUID()}`;
-  rmSync(temporaryPath, { recursive: true, force: true });
+  let stage = "skill-stage";
   try {
+    withWindowsDirectoryRetry(() => rmSync(temporaryPath, { recursive: true, force: true }));
     cpSync(source, temporaryPath, { recursive: true });
     atomicWriteJson(
       join(temporaryPath, SKILL_PACKAGE_METADATA),
       skillPackageMetadata(memoraxCodeCommand),
     );
-    rmSync(destination, { recursive: true, force: true });
-    renameSync(temporaryPath, destination);
+    stage = "skill-remove";
+    withWindowsDirectoryRetry(() => rmSync(destination, { recursive: true, force: true }));
+    stage = "skill-publish";
+    withWindowsDirectoryRetry(() => renameSync(temporaryPath, destination));
   } catch (error) {
-    rmSync(temporaryPath, { recursive: true, force: true });
+    try {
+      withWindowsDirectoryRetry(() => rmSync(temporaryPath, { recursive: true, force: true }));
+    } catch {
+      // Preserve the installation failure; a later attempt can repair the Skill.
+    }
+    error.stage = stage;
     throw error;
   }
 }
@@ -642,6 +660,8 @@ function failure(reason, paths, error, action = "status") {
     managed: existsSync(paths.statePath),
     reason,
     error: error instanceof Error ? error.message : String(error),
+    ...(typeof error?.code === "string" ? { errorCode: error.code } : {}),
+    ...(typeof error?.stage === "string" ? { stage: error.stage } : {}),
     traeHome: paths.traeHome,
     statePath: paths.statePath,
   };

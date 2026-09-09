@@ -26,7 +26,11 @@ import {
   defaultTraeHome,
   traeInstallationDetected,
 } from "../lib/memorax-code-trae-adapter/src/adapter-paths.mjs";
-import { reconcileSetup } from "../lib/setup-reconcile.mjs";
+import {
+  failedLifecycleAdapters,
+  reconcileSetup,
+  startLifecycleReport,
+} from "../lib/setup-reconcile.mjs";
 import { detectSetupMemoryPreferences } from "../lib/setup-memory-preferences.mjs";
 import { ensureTrialSetupCredential } from "../lib/trial-setup.mjs";
 import { commandOnPath } from "../lib/vscode-extension-command.mjs";
@@ -1184,15 +1188,19 @@ async function startBackendAndCheck({
   traeSkipReason,
 } = {}) {
   const adapterFlags = clientLifecycleFlags({ clientMode });
-  const startArgs = ["start", ...adapterFlags];
+  const startArgs = ["start", ...adapterFlags, "--json"];
   const statusArgs = ["status", ...adapterFlags];
   const optionalDshEnv = { [DSH_OPTIONAL_ENV]: "1" };
   let statusResult;
   const result = await reconcileSetup({
-    start: () => runMemoraxCodeCommand(startArgs, {
-      ...pendingClientHookRuntimeEnv(),
-      ...optionalDshEnv,
-    }),
+    start: () => {
+      const started = runMemoraxCodeCommand(startArgs, {
+        ...pendingClientHookRuntimeEnv(),
+        ...optionalDshEnv,
+      }, { print: false });
+      printSetupStartResult(started);
+      return started;
+    },
     stop: () => runMemoraxCodeCommand(["stop", ...adapterFlags]),
     status: () => {
       statusResult = runMemoraxCodeCommand(statusArgs, optionalDshEnv);
@@ -1209,7 +1217,9 @@ async function startBackendAndCheck({
       if (event.type === "start" && event.attempt === 1) {
         logGreen("Starting backend with `memorax-code start`...");
       } else if (event.type === "start-failed" && event.attempt === 1) {
-        logRed("Backend start failed during setup.");
+        logRed(event.reason === "adapter-setup-failed"
+          ? "Client integration setup failed; the Backend is running."
+          : "MemoraX Code start failed during setup.");
       } else if (event.type === "stop") {
         logRed("Attempting automatic recovery: `memorax-code stop` then `memorax-code start`...");
       } else if (event.type === "diagnostic-status") {
@@ -1268,7 +1278,10 @@ function printReconcileFailure(result, {
   skipTraeAdapter,
   traeSkipReason,
 }) {
-  if (result.reason === "hook-runtime-activation-failed") {
+  if (result.reason === "adapter-setup-failed") {
+    logRed("Automatic stop/start recovery was skipped because the Backend is running; setup remains incomplete.");
+    log("Fix the reported client installation error, then retry `memorax-code setup`.");
+  } else if (result.reason === "hook-runtime-activation-failed") {
     logRed("Client Hook runtime activation failed; automatic lifecycle recovery was skipped.");
     logRed("The previously active runtime remains authoritative.");
   } else if (result.reason === "lifecycle-lock-timeout") {
@@ -1371,6 +1384,7 @@ function clientSelectionMessage(clients, { dshSelected = false } = {}) {
 function clientLabel(client) {
   if (client === "codex") return "Codex";
   if (client === "claude") return "Claude Code";
+  if (client === "dsh") return "DeepSeek Harness";
   if (client === "opencode") return "OpenCode";
   if (client === "codebuddy") return "CodeBuddy/WorkBuddy";
   return "Trae";
@@ -1402,8 +1416,41 @@ function stringOption(value) {
   return trimmed ? trimmed : undefined;
 }
 
-function runMemoraxCodeCommand(args, extraEnv = {}) {
+function printSetupStartResult(result) {
+  const report = startLifecycleReport(result);
+  if (!report) {
+    printCommandOutput(result.stdout, BACKEND_PREFIX);
+  } else {
+    if (typeof report.message === "string") logRed(report.message);
+    if (report.backend?.ok === false) {
+      const code = report.backend.errorCode ? ` code=${report.backend.errorCode}` : "";
+      logRed(`Backend: not ok${code} ${report.backend.error ?? report.backend.reason ?? "start failed"}`);
+    }
+    const warnings = report.backend?.warnings;
+    for (const warning of Array.isArray(warnings) ? warnings : []) {
+      if (typeof warning?.message === "string") {
+        log(`Warning: ${warning.message}${warning.errorCode ? ` code=${warning.errorCode}` : ""}`);
+      }
+    }
+    for (const adapter of failedLifecycleAdapters(report)) {
+      const details = [
+        `action=${adapter.action ?? "enable"}`,
+        adapter.stage ? `stage=${adapter.stage}` : undefined,
+        adapter.errorCode ? `code=${adapter.errorCode}` : undefined,
+      ].filter(Boolean).join(" ");
+      const optionalDsh = adapter.client === "dsh" && adapter.optional === true;
+      const message = `${clientLabel(adapter.client)} adapter: ${optionalDsh ? "unavailable" : "not ok"} ${details} ${adapter.error ?? adapter.message ?? adapter.reason ?? "installation failed"}`;
+      if (optionalDsh) log(message);
+      else logRed(message);
+    }
+  }
+  printCommandOutput(result.stderr, BACKEND_PREFIX);
+  if (result.error) logRed(`Failed to run \`memorax-code start\`: ${result.error.message}`);
+}
+
+function runMemoraxCodeCommand(args, extraEnv = {}, { print = true } = {}) {
   return runNodeMemoraxCodeCommand(args, {
+    print,
     env: { ...process.env, ...extraEnv, MEMORAX_CODE_BACKEND_SUPPRESS_GUIDANCE: "1" },
     outputPrefix: BACKEND_PREFIX,
   });

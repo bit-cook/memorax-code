@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -185,6 +187,61 @@ test("OpenCode plugin install refuses to overwrite a recorded loader without its
     assert.equal(result.reason, "plugin_conflict");
     assert.equal(await readFile(installed.pluginPath, "utf8"), customLoader);
   } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode directory publication retries Windows contention and preserves exhausted failures", async () => {
+  const fixture = await createFixture("directory-contention");
+  const skillPath = join(fixture.openCodeConfigDir, "skills", "memorax-code");
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalRename = fs.renameSync;
+  const originalRemove = fs.rmSync;
+  const publishError = Object.assign(new Error("directory publication denied"), { code: "EPERM" });
+  let persistent = false;
+  let skillRenames = 0;
+  let skillRemovals = 0;
+  fs.renameSync = (source, destination) => {
+    if (destination === skillPath && (++skillRenames === 1 || persistent)) throw publishError;
+    return originalRename(source, destination);
+  };
+  fs.rmSync = (target, ...args) => {
+    if (target === skillPath && ++skillRemovals === 1) {
+      throw Object.assign(new Error("directory removal busy"), { code: "EBUSY" });
+    }
+    if (persistent && target.startsWith(`${skillPath}.tmp-`) && fs.existsSync(target)) {
+      throw Object.assign(new Error("stage cleanup failed"), { code: "EIO" });
+    }
+    return originalRemove(target, ...args);
+  };
+  Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+  syncBuiltinESMExports();
+  try {
+    const installed = ensureOpenCodePluginInstalled(fixture.options);
+    assert.equal(installed.ok, true);
+    assert.equal(await readFile(join(skillPath, "SKILL.md"), "utf8"), "# MemoraX Code\n");
+    assert.deepEqual([skillRenames, skillRemovals], [2, 2]);
+    assert.equal(ensureOpenCodePluginInstalled(fixture.options).changed, false);
+    assert.deepEqual([skillRenames, skillRemovals], [2, 2]);
+
+    const previousState = await readFile(installed.statePath, "utf8");
+    await writeFile(join(fixture.options.skillSourcePath, "SKILL.md"), "# Updated Skill\n");
+    persistent = true;
+    assert.throws(() => ensureOpenCodePluginInstalled(fixture.options), (error) => (
+      error === publishError && error.stage === "skill-publish" && error.code === "EPERM"
+    ));
+    assert.equal(skillRenames, 7, "persistent contention must stop after the bounded retries");
+    assert.equal(await readFile(installed.statePath, "utf8"), previousState);
+    assert.equal(readOpenCodePluginStatus(fixture.options).enabled, false);
+
+    persistent = false;
+    assert.equal(ensureOpenCodePluginInstalled(fixture.options).ok, true);
+    assert.equal(await readFile(join(skillPath, "SKILL.md"), "utf8"), "# Updated Skill\n");
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    fs.renameSync = originalRename;
+    fs.rmSync = originalRemove;
+    syncBuiltinESMExports();
     await rm(fixture.root, { recursive: true, force: true });
   }
 });
