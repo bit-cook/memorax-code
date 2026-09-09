@@ -5,6 +5,7 @@ import {
   localBackendRecoveryArguments,
   resolveBackendConnection,
 } from "../backend-connection.mjs";
+import { withJsonFileLockAsync } from "../config-utils.mjs";
 import { isRepoMemoryJobWorker } from "../repo-memory/repo-memory-job-context.mjs";
 
 export const DEFAULT_ENSURE_BACKEND_START_TIMEOUT_MS = 90000;
@@ -41,22 +42,51 @@ export async function ensureBackendAvailable(options, input = {}) {
     return;
   }
 
-  const recoveryArguments = localBackendRecoveryArguments(connection);
-  if (recoveryArguments === undefined) return;
+  if (localBackendRecoveryArguments(connection) === undefined) return;
   if (!command.value || command.removed === true || !memoraxCodeCommandAvailable(command.value)) return;
-  const result = await runMemoraxCode(
-    command.value,
-    options.buildStartArgs(homes, recoveryArguments),
-    parsePositiveInt(options.startTimeoutValue, DEFAULT_ENSURE_BACKEND_START_TIMEOUT_MS),
-    options.nodePath,
-    recoveryEnvironment(options.recoveryEnv, metadata),
-  );
-  if (result.code !== 0) {
-    options.debug?.(
-      `MemoraX Code backend start failed with code ${result.code}${result.stderr ? `: ${result.stderr}` : ""}`,
-    );
-    return;
+  const startTimeoutMs = parsePositiveInt(options.startTimeoutValue, DEFAULT_ENSURE_BACKEND_START_TIMEOUT_MS);
+  const deadline = Date.now() + startTimeoutMs;
+  try {
+    // Hooks from different clients and processes share one recovery attempt.
+    // This lock is separate from the lifecycle lock acquired by the child CLI.
+    await withJsonFileLockAsync(join(homes.memoraxCodeHome, "runtime", "backend", "hook-recovery.json"), async () => {
+      connection = refreshedBackendConnection(options.backendConnection, homes.memoraxCodeHome);
+      const remainingHealthMs = Math.min(healthTimeoutMs, deadline - Date.now());
+      if (remainingHealthMs <= 0) return;
+      if (await backendHealthy(connection, remainingHealthMs)) {
+        await options.onHealthy?.({ homes, backendUrl: connection.url });
+        return;
+      }
+      const recoveryArguments = localBackendRecoveryArguments(connection);
+      const remainingStartMs = deadline - Date.now();
+      if (recoveryArguments === undefined || remainingStartMs <= 0 || !memoraxCodeCommandAvailable(command.value)) return;
+      const result = await runMemoraxCode(
+        command.value,
+        options.buildStartArgs(homes, recoveryArguments),
+        remainingStartMs,
+        options.nodePath,
+        recoveryEnvironment(options.recoveryEnv, metadata),
+      );
+      if (result.code !== 0) {
+        options.debug?.(
+          `MemoraX Code backend start failed with code ${result.code}${result.stderr ? `: ${result.stderr}` : ""}`,
+        );
+      }
+    }, { timeoutMs: startTimeoutMs });
+  } catch (error) {
+    options.debug?.(error instanceof Error ? error.message : String(error));
   }
+
+}
+
+function refreshedBackendConnection(supplied, memoraxCodeHome) {
+  if (!supplied) return resolveBackendConnection({ memoraxCodeHome });
+  return resolveBackendConnection({
+    memoraxCodeHome,
+    env: {},
+    backendUrl: supplied.source === "authority" || supplied.source === "default" ? undefined : supplied.url,
+    backendToken: supplied.tokenSource === "authority-file" ? undefined : supplied.token,
+  });
 }
 
 export function stringValue(value) {
