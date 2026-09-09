@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -229,6 +229,50 @@ test("installed clients isolate identical native identities and pin their select
   } finally { await server.close(); }
 });
 
+test("Hooks without valid client metadata leave Backend and client state untouched", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-hook-authority-"));
+  const requests = [];
+  const server = await startServer(requests, { ok: true, scheduled: true });
+  try {
+    for (const [name, metadata] of [
+      ["missing", undefined],
+      ["malformed", "{"],
+      ["unsupported-version", JSON.stringify({ version: 2, client: "workbuddy" })],
+      ["unknown-client", JSON.stringify({ version: 1, client: "unknown" })],
+    ]) {
+      const home = join(root, name);
+      const nativeHome = join(home, "native-workbuddy");
+      await enableCodeBuddyAdapter({ client: "workbuddy", codeBuddyHome: nativeHome, memoraxCodeHome: home, codeBuddyCommand: "fixture-workbuddy" });
+      const pluginRoot = codeBuddyInstallPath(nativeHome);
+      const metadataPath = join(pluginRoot, ".memorax-code-package.json");
+      if (metadata === undefined) await rm(metadataPath);
+      else await writeFile(metadataPath, metadata);
+      const envFile = join(home, "session.env");
+      const preserved = new Map([[envFile, "export EXISTING_SESSION_VALUE='preserved'\n"]]);
+      for (const client of ["codebuddy", "workbuddy"]) {
+        const adapterDir = join(home, "adapters", client);
+        await mkdir(adapterDir, { recursive: true });
+        preserved.set(join(adapterDir, "pending.json"), '{"retained":{"sentinel":true}}\n');
+        preserved.set(join(adapterDir, "runtime-observed.json"), '{"sentinel":true}\n');
+      }
+      for (const [path, content] of preserved) await writeFile(path, content);
+      for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+        const result = await runHook({
+          hook_event_name: event, session_id: "retained", transcript_path: join(home, "session.jsonl"),
+          prompt: "do not dispatch without client identity", cwd: home,
+        }, { root: home, server, hookEntry: join(pluginRoot, "hooks", "runtime-hook.mjs"), hookEnv: { CODEBUDDY_ENV_FILE: envFile } });
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stdout, "", `${name}: ${event}`);
+        assert.deepEqual(requests, [], `${name}: ${event}`);
+        for (const [path, content] of preserved) assert.equal(await readFile(path, "utf8"), content, `${name}: ${event}: ${path}`);
+      }
+    }
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("UserPromptSubmit exposes a Backend user notice without model context", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-codebuddy-hook-"));
   const transcriptPath = join(root, "session.jsonl");
@@ -413,12 +457,18 @@ async function startServer(requests, response) {
 async function runHook(input, { root, server, hookEnv = {}, pluginEnabled = true, mode, hookEntry = hookPath }) {
   const address = server.address();
   const codeBuddyHome = join(root, "workbuddy");
+  if (hookEntry === hookPath) {
+    hookEntry = join(codeBuddyInstallPath(codeBuddyHome), "hooks", "runtime-hook.mjs");
+    try { await access(hookEntry); } catch {
+      await enableCodeBuddyAdapter({ client: "codebuddy", codeBuddyHome, memoraxCodeHome: root, codeBuddyCommand: "fixture-codebuddy" });
+    }
+  }
   if (pluginEnabled !== null) {
     await mkdir(codeBuddyHome, { recursive: true });
     await writeFile(join(codeBuddyHome, "settings.json"), JSON.stringify({
       enabledPlugins: { "memorax-code-codebuddy-adapter@memorax-code-local": pluginEnabled },
     }));
-  }
+  } else await rm(join(codeBuddyHome, "settings.json"), { force: true });
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [hookEntry, mode ?? (input.hook_event_name === "UserPromptSubmit" ? "managed-user-prompt" : "turn")], {
       cwd: root,

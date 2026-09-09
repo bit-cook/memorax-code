@@ -49,10 +49,11 @@ function createCodeBuddyAdapterLifecycle(client: "codebuddy" | "workbuddy"): Ada
 }
 async function load(): Promise<CodeBuddyConfig> { return await import(new URL("../../../../memorax-code-codebuddy-adapter/src/config.mjs", import.meta.url).href) as CodeBuddyConfig; }
 async function options(argv: string[], serviceOptions: { home?: string }, client: "codebuddy" | "workbuddy"): Promise<Record<string, unknown>> {
-  let home = homeArgument(argv, client === "workbuddy" ? "--workbuddy-home" : "--codebuddy-home");
+  const workBuddyHome = homeArgument(argv, "--workbuddy-home");
+  let home = client === "workbuddy" ? workBuddyHome : homeArgument(argv, "--codebuddy-home");
   const legacyHome = homeArgument(argv, "--codebuddy-home");
   const explicitCodeBuddySelection = argv.includes("--clients") && resolveManagedClients(argv).codebuddy;
-  if (legacyHome && !homeArgument(argv, "--workbuddy-home")
+  if (legacyHome && !workBuddyHome
     && (client === "workbuddy" || !explicitCodeBuddySelection)) {
     // Owned legacy WorkBuddy roots apply to that product alone. Preserve the
     // CLI's retained root unless the user explicitly selects it with this flag.
@@ -61,7 +62,7 @@ async function options(argv: string[], serviceOptions: { home?: string }, client
     });
     if (target) home = client === "workbuddy" ? target.codeBuddyHome : undefined;
   }
-  return { client, ...(home ? { codeBuddyHome: home } : {}), memoraxCodeHome: serviceOptions.home };
+  return { client, ...(home ? { codeBuddyHome: home } : {}), ...(workBuddyHome ? { workBuddyHome } : {}), memoraxCodeHome: serviceOptions.home };
 }
 function homeArgument(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name);

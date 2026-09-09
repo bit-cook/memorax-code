@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -90,7 +90,7 @@ function traeHookCount(config) {
 }
 
 test("CodeBuddy and WorkBuddy retain separate homes through partial stop and uninstall", { timeout: 30_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-buddy-clients-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "memorax-code-buddy-clients-")));
   const home = join(root, "backend");
   const codeBuddyHome = join(root, "cli-config");
   const workBuddyHome = join(root, "desktop-config");
@@ -99,16 +99,32 @@ test("CodeBuddy and WorkBuddy retain separate homes through partial stop and uni
   const args = ["--home", home, "--port", String(port), "--json"];
   const env = { MEMORAX_CODE_CODEBUDDY_COMMAND: process.execPath, MEMORAX_CODE_WORKBUDDY_COMMAND: process.execPath };
   const pluginId = "memorax-code-codebuddy-adapter@memorax-code-local";
+  const installationPath = join(home, "adapters", "workbuddy", "installation.json");
   try {
+    const legacyPluginRoot = join(workBuddyHome, "plugins", "marketplaces", "memorax-code-local", "plugins", "memorax-code-codebuddy-adapter");
+    await mkdir(legacyPluginRoot, { recursive: true });
+    await mkdir(home, { recursive: true });
+    await writeFile(join(legacyPluginRoot, ".memorax-code-package.json"), JSON.stringify({
+      version: 1, codeBuddyHome: workBuddyHome, codeBuddyCommand: "codebuddy",
+    }));
+    await writeFile(join(home, "config.toml"), [
+      "[clients]", "codex = false", "claude = false", "dsh = false", "opencode = false", "trae = false", "codebuddy = true", "",
+    ].join("\n"));
+    const migrated = await runCli(cliPath, ["start", ...args, "--workbuddy-home", "desktop-config"], { env, cwd: root });
+    assert.equal(migrated.code, 0, migrated.stdout + migrated.stderr);
+    assert.equal(JSON.parse(migrated.stdout).codebuddyAdapter, undefined);
+    assert.equal(JSON.parse(migrated.stdout).workbuddyAdapter.codeBuddyHome, workBuddyHome);
+    assert.equal(await pathExists(codeBuddyHome), false);
+    const migratedInstallation = JSON.parse(await readFile(installationPath, "utf8"));
+    assert.equal(migratedInstallation.legacyClientAlias, true);
+    assert.equal(migratedInstallation.codeBuddyCommand, "codebuddy");
+
     const start = await runCli(cliPath, ["start", ...args, "--clients", "codebuddy,workbuddy",
       "--codebuddy-home", codeBuddyHome, "--workbuddy-home", workBuddyHome], { env });
     assert.equal(start.code, 0, start.stdout + start.stderr);
     const started = JSON.parse(start.stdout);
     assert.equal(started.codebuddyAdapter.runtime, "codebuddy");
     assert.equal(started.workbuddyAdapter.runtime, "workbuddy");
-    const installationPath = join(home, "adapters", "workbuddy", "installation.json");
-    const installation = JSON.parse(await readFile(installationPath, "utf8"));
-    await writeFile(installationPath, JSON.stringify({ ...installation, legacyClientAlias: true }));
     const legacyHomeStart = await runCli(cliPath, ["start", ...args, "--preserve-clients", "--codebuddy-home", workBuddyHome], { env });
     assert.equal(legacyHomeStart.code, 0, legacyHomeStart.stdout + legacyHomeStart.stderr);
     assert.equal(JSON.parse(legacyHomeStart.stdout).codebuddyAdapter.codeBuddyHome, codeBuddyHome);

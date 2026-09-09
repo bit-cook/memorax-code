@@ -58,7 +58,7 @@ export async function readManagedCodeBuddyTarget(options = {}) {
   for (const home of new Set(homes)) {
     for (const root of [marketplacePluginPath(home), codeBuddyInstallPath(home)]) {
       const metadata = readCodeBuddyPackageMetadata(root);
-      if (codeBuddyMetadataClient(metadata) !== client || !stringValue(metadata?.codeBuddyCommand)) continue;
+      if (codeBuddyMetadataClient(metadata, options) !== client || !stringValue(metadata?.codeBuddyCommand)) continue;
       if (metadata.codeBuddyHome && comparablePath(metadata.codeBuddyHome, options.platform ?? process.platform)
         !== comparablePath(home, options.platform ?? process.platform)) continue;
       return { version: 1, client, codeBuddyHome: home, codeBuddyCommand: metadata.codeBuddyCommand,
@@ -83,7 +83,7 @@ export async function resolveCodeBuddyClientSelection(clients, options = {}) {
     if (legacyHome) break;
     for (const root of [marketplacePluginPath(home), codeBuddyInstallPath(home)]) {
       const metadata = readCodeBuddyPackageMetadata(root);
-      if (metadata?.client !== undefined || codeBuddyMetadataClient(metadata) !== "workbuddy") continue;
+      if (metadata?.client !== undefined || codeBuddyMetadataClient(metadata, options) !== "workbuddy") continue;
       if (metadata.codeBuddyHome && comparablePath(metadata.codeBuddyHome, options.platform ?? process.platform)
         !== comparablePath(home, options.platform ?? process.platform)) continue;
       legacyHome = home;
@@ -109,7 +109,7 @@ async function resolveTarget(options) {
   for (const root of [marketplacePluginPath(home), codeBuddyInstallPath(home)]) {
     const metadataPath = join(root, ".memorax-code-package.json");
     const metadata = readCodeBuddyPackageMetadata(root);
-    if (existsSync(metadataPath) && (!metadata || (metadata.client !== undefined && !codeBuddyMetadataClient(metadata)))) {
+    if (existsSync(metadataPath) && (!metadata || (metadata.client !== undefined && !codeBuddyMetadataClient(metadata, options)))) {
       throw new Error(`invalid adapter installation metadata: ${metadataPath}`);
     }
     if (metadata?.codeBuddyHome && comparablePath(metadata.codeBuddyHome, options.platform ?? process.platform)
@@ -236,8 +236,10 @@ async function removeAdapter(options) {
   const { client, codeBuddyHome: home, ownedByOtherClient } = await resolveTarget(options);
   const removed = !ownedByOtherClient && await removeManagedCodeBuddyInstallation(home);
   const retained = await readManagedCodeBuddyTarget({ ...options, codeBuddyHome: undefined });
-  if (!ownedByOtherClient && retained?.codeBuddyHome === home) await rm(managedTargetPath(options), { force: true });
-  return { ok: true, action: "codebuddy-plugin-remove", runtime: client, installed: false, enabled: false, removed, codeBuddyHome: home, statePath: installedRegistryPath(home), marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID };
+  const platform = options.platform ?? process.platform;
+  if (!ownedByOtherClient && retained
+    && comparablePath(retained.codeBuddyHome, platform) === comparablePath(home, platform)) await rm(managedTargetPath(options), { force: true });
+  return { ok: true, action: `${client}-plugin-remove`, runtime: client, installed: false, enabled: false, removed, codeBuddyHome: home, statePath: installedRegistryPath(home), marketplace: MARKETPLACE_NAME, pluginId: PLUGIN_ID };
 }
 
 async function disableManagedCodeBuddyInstallation(home) {

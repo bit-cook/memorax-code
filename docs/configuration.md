@@ -289,8 +289,12 @@ root. Retained installation records live under
 
 Older versions represented WorkBuddy as `codebuddy`. When `workbuddy` has no
 explicit selection, owned legacy installation metadata identifies that old
-choice during setup and lifecycle reconciliation. An explicit `workbuddy = true`
-or `false` takes precedence. Historical traces stay in their original client
+choice by its bundled command, `.workbuddy` root, or an explicitly configured
+WorkBuddy root during setup and lifecycle reconciliation. A `.codebuddy` root
+with a PATH command alone does not distinguish the two clients and retains
+the CLI identity. An explicit `workbuddy = true` or `false` takes precedence;
+explicit client identity in installation metadata also takes precedence over
+legacy inference. Historical traces stay in their original client
 namespace; newly installed Hooks use the distinct client identities.
 
 The Skill is materialized from the canonical MemoraX Code Skill. CodeBuddy's

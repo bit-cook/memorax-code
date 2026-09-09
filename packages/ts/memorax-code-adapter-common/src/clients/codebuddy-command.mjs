@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, win32 } from "node:path";
+import { join, resolve, win32 } from "node:path";
 
 const APP_NAMES = ["WorkBuddy.app", "CodeBuddy.app"];
 const BUNDLED_SEGMENTS = ["Contents", "Resources", "app.asar.unpacked", "cli", "bin", "codebuddy"];
@@ -22,16 +22,26 @@ export function defaultWorkBuddyHome(env = process.env, homeDir = homedir(), pla
   const legacyHome = pathJoin(homeDir, ".codebuddy");
   const legacyMetadata = readCodeBuddyPackageMetadata(pathJoin(legacyHome, "plugins", "marketplaces", "memorax-code-local", "plugins", "memorax-code-codebuddy-adapter"));
   // Only owned installation metadata can identify the historical Windows home.
-  if (platform === "win32" && codeBuddyMetadataClient(legacyMetadata) === "workbuddy"
+  if (platform === "win32" && codeBuddyMetadataClient(legacyMetadata, { env, platform }) === "workbuddy"
     && (!legacyMetadata.codeBuddyHome || legacyMetadata.codeBuddyHome.replaceAll("\\", "/").toLowerCase() === legacyHome.replaceAll("\\", "/").toLowerCase())) return legacyHome;
   return pathJoin(homeDir, ".workbuddy");
 }
 
-export function codeBuddyMetadataClient(metadata) {
+export function codeBuddyMetadataClient(metadata, { workBuddyHome, env = process.env, platform = process.platform } = {}) {
+  if (metadata?.version !== 1) return undefined;
   if (metadata?.client === "codebuddy" || metadata?.client === "workbuddy") return metadata.client;
   if (metadata?.client !== undefined) return undefined;
-  return isWorkBuddyBundledCommand(metadata?.codeBuddyCommand) ? "workbuddy"
-    : stringValue(metadata?.codeBuddyCommand) ? "codebuddy" : undefined;
+  if (!stringValue(metadata.codeBuddyCommand)) return undefined;
+  const nativeHome = stringValue(metadata.codeBuddyHome);
+  const configuredHome = stringValue(workBuddyHome) ?? stringValue(env.WORKBUDDY_HOME);
+  const normalizeHome = platform === "win32"
+    ? (home) => win32.resolve(home).toLowerCase()
+    : resolve;
+  // Old WorkBuddy installs could use a PATH or configured CLI. The owned home
+  // disambiguates those records; an unqualified .codebuddy home alone cannot.
+  const workBuddyRoot = nativeHome && (win32.basename(nativeHome).toLowerCase() === ".workbuddy"
+    || (configuredHome && normalizeHome(nativeHome) === normalizeHome(configuredHome)));
+  return isWorkBuddyBundledCommand(metadata.codeBuddyCommand) || workBuddyRoot ? "workbuddy" : "codebuddy";
 }
 
 export function isWorkBuddyBundledCommand(command) {
@@ -59,9 +69,9 @@ export function resolveHookCodeBuddyCommand({
   pathExists = commandPathExists,
 } = {}) {
   const metadata = readCodeBuddyPackageMetadata(stringValue(pluginRoot) ?? stringValue(env.CODEBUDDY_PLUGIN_ROOT));
-  const selectedClient = client ?? codeBuddyMetadataClient(metadata) ?? "codebuddy";
+  const metadataClient = codeBuddyMetadataClient(metadata, { env, platform });
+  const selectedClient = client ?? metadataClient ?? "codebuddy";
   if (selectedClient !== "codebuddy" && selectedClient !== "workbuddy") throw new Error("invalid CodeBuddy adapter client");
-  const metadataClient = codeBuddyMetadataClient(metadata);
   // Installed workers retain their selected command even when the ambient
   // shell or application exports another client's command overrides.
   const metadataCommand = metadataClient === selectedClient ? stringValue(metadata?.codeBuddyCommand) : undefined;

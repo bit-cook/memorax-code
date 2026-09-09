@@ -12,7 +12,7 @@ import { writeCodeBuddyRuntimeObservation } from "../src/runtime-observation.mjs
 
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const commonRoot = resolveCommonSourceRoot(pluginRoot);
-const { codeBuddyMetadataClient, defaultCodeBuddyHome, defaultWorkBuddyHome } = await import(pathToFileURL(join(commonRoot, "clients", "codebuddy-command.mjs")).href);
+const { codeBuddyMetadataClient, defaultCodeBuddyHome, defaultWorkBuddyHome, readCodeBuddyPackageMetadata } = await import(pathToFileURL(join(commonRoot, "clients", "codebuddy-command.mjs")).href);
 const { scheduleMissingRepoMemoryBuild } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-memory-auto-build.mjs")).href);
 const { isRepoMemoryJobWorker } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-memory-job-context.mjs")).href);
 const { buildRepoProcedureMemoryContext } = await import(pathToFileURL(join(commonRoot, "repo-memory", "repo-procedure-memory-context.mjs")).href);
@@ -39,9 +39,10 @@ const sessionId = stringValue(input?.session_id) ?? stringValue(input?.sessionId
 const transcriptPath = stringValue(input?.transcript_path) ?? stringValue(input?.transcriptPath);
 if (!event || !sessionId || !transcriptPath) process.exit(0);
 const home = process.env.MEMORAX_CODE_HOME?.trim() || join(homedir(), ".memorax-code");
-const packageMetadata = await readRecord(join(pluginRoot, ".memorax-code-package.json"));
-const client = codeBuddyMetadataClient(packageMetadata) ?? "codebuddy";
-if (packageMetadata.client !== undefined && packageMetadata.client !== client) process.exit(0);
+const packageMetadata = readCodeBuddyPackageMetadata(pluginRoot);
+const client = codeBuddyMetadataClient(packageMetadata);
+// Shared Hook code needs installation authority before touching either client's state.
+if (!client) process.exit(0);
 const codeBuddyHome = commonStringValue(packageMetadata.codeBuddyHome)
   ?? (client === "workbuddy" ? defaultWorkBuddyHome() : defaultCodeBuddyHome());
 const managedPrompt = process.argv[2] === "managed-user-prompt";

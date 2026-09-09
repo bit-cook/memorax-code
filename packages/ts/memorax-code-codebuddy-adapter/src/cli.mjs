@@ -12,7 +12,7 @@ try {
     console.log("Usage: memorax-code-codebuddy [status|enable|disable|remove] [--client codebuddy|workbuddy] [--codebuddy-home DIR|--workbuddy-home DIR] [--json]");
     process.exit(0);
   }
-  const options = { client: parsed.client, codeBuddyHome: parsed.home };
+  const options = { client: parsed.client, codeBuddyHome: parsed.home, workBuddyHome: parsed.workBuddyHome };
   const result = parsed.command === "status"
     ? await readCodeBuddyAdapterStatus(options)
     : parsed.command === "enable"
@@ -41,6 +41,7 @@ function parseCli(argv) {
   const args = argv.slice(2);
   const command = args[0] && !args[0].startsWith("-") ? args.shift() : "status";
   let home;
+  let workBuddyHome;
   let client = "codebuddy";
   let json = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -56,9 +57,10 @@ function parseCli(argv) {
       if (arg === "--workbuddy-home") client = "workbuddy";
       home = args[++index];
       if (!home || home.startsWith("--")) throw new Error(`${arg} requires a value`);
+      if (arg === "--workbuddy-home") workBuddyHome = home;
       continue;
     }
     throw new Error(`unknown option: ${arg}`);
   }
-  return { command, home, client, json, help: false };
+  return { command, home, workBuddyHome, client, json, help: false };
 }
