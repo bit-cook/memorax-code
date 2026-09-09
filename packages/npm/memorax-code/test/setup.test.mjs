@@ -131,7 +131,7 @@ async function startMockMemorax({ status = 200, body = { success: true, data: { 
   };
 }
 
-async function runSetup({ existingCache = false, explicitCache = false, codexRegistered, hookRuntimeFailure, failStartOnce = false, connectionAuthorityFailure = false, runtimeAuthorityFailureCode, officialMode = false, codexConfig, memoraxCodeConfig, memoraxCodeConfigMode, emptyClaudeSettings = false, claudeAvailable = true, claudeVersionFails = false, claudeSettingsText, codexAvailable = true, codexAppOnly = false, vscodeOnly = false, dshProfiles = [], opencodeAvailable = false, opencodeXdgAvailable = false, opencodeCliAvailable = false, codebuddyAvailable = false, traeAvailable = false, skipCodexPluginInstall = false, skipClaudeAdapterInstall = false, skipOpenCodeAdapterInstall = false, skipCodeBuddyAdapterInstall = false, skipTraeAdapterInstall = false, unavailableStatus = false, prefixedStatus = false, input = "", interactive = true, npmCommand = "install", updateMode = false, setupMode = "automatic", memoraxVerify, memoraxEnv = {}, memoryStatusFixture, trialProvisionFailure = false, hookSnapshot = [], hookUpdatePlan = [], hookFullReview = false, hookFullReviewMissing = false, hookSnapshotFails = false, hookCheckFails = false, hookTrustFails = false, detectedUserId = "memory-user", detectedLanguage = "zh", ttyOverride } = {}) {
+async function runSetup({ existingCache = false, explicitCache = false, codexRegistered, hookRuntimeFailure, failStartOnce = false, adapterStartFailure = false, connectionAuthorityFailure = false, runtimeAuthorityFailureCode, officialMode = false, codexConfig, memoraxCodeConfig, memoraxCodeConfigMode, emptyClaudeSettings = false, claudeAvailable = true, claudeVersionFails = false, claudeSettingsText, codexAvailable = true, codexAppOnly = false, vscodeOnly = false, dshProfiles = [], opencodeAvailable = false, opencodeXdgAvailable = false, opencodeCliAvailable = false, codebuddyAvailable = false, traeAvailable = false, skipCodexPluginInstall = false, skipClaudeAdapterInstall = false, skipOpenCodeAdapterInstall = false, skipCodeBuddyAdapterInstall = false, skipTraeAdapterInstall = false, unavailableStatus = false, prefixedStatus = false, input = "", interactive = true, npmCommand = "install", updateMode = false, setupMode = "automatic", memoraxVerify, memoraxEnv = {}, memoryStatusFixture, trialProvisionFailure = false, hookSnapshot = [], hookUpdatePlan = [], hookFullReview = false, hookFullReviewMissing = false, hookSnapshotFails = false, hookCheckFails = false, hookTrustFails = false, detectedUserId = "memory-user", detectedLanguage = "zh", ttyOverride } = {}) {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-setup-"));
   const binDir = join(root, "bin");
   const codexHome = join(root, "codex-home");
@@ -180,6 +180,7 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     "backend-connection.mjs",
     "hooks/capture-cwd-hook.mjs",
     "hooks/client-hook-launcher.mjs",
+    "windows-directory-retry.mjs",
     "clients/codex-plugin-artifact.mjs",
     "automatic-update-state.mjs",
     "config-utils.mjs",
@@ -337,6 +338,14 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     "  console.error('fake memorax-code start failure');",
     "  process.exit(7);",
     "}",
+    "if (process.argv[2] === 'start' && process.env.MEMORAX_CODE_TEST_ADAPTER_START_FAILURE === '1') {",
+    "  console.log(JSON.stringify({",
+    "    ok: false, action: 'start',",
+    "    backend: { ok: true, reason: 'trae_adapter_enable_failed_backend_recovered', warnings: [{ message: 'Backend persistence warning', errorCode: 'EIO' }] },",
+    "    traeAdapter: { ok: false, action: 'enable', stage: 'skill-publish', errorCode: 'EPERM', error: 'rename denied' },",
+    "  }));",
+    "  process.exit(7);",
+    "}",
     "if (process.argv[2] === 'start') {",
     "  const preservedGeneration = process.env.MEMORAX_CODE_TEST_PRESERVED_HOOK_GENERATION;",
     "  if (preservedGeneration) {",
@@ -363,6 +372,8 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     "      process.exit(7);",
     "    }",
     "  }",
+    "  const optionalDshUnavailable = process.env.MEMORAX_CODE_TEST_DSH_ENABLED !== '1' && process.argv[process.argv.indexOf('--clients') + 1]?.split(',').includes('dsh');",
+    "  console.log(JSON.stringify({ ok: true, action: 'start', backend: { ok: true }, ...(optionalDshUnavailable ? { dshAdapter: { ok: false, action: 'enable', optional: true, reason: 'runtime_not_detected' } } : {}) }));",
     "  console.error('fake memorax-code start output');",
     "  if (process.env.MEMORAX_CODE_BACKEND_SUPPRESS_GUIDANCE === '1') console.error('suppressed guidance env seen');",
     "}",
@@ -596,6 +607,7 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     MEMORAX_CODE_SKIP_TRAE_ADAPTER_INSTALL: skipTraeAdapterInstall ? "1" : "0",
     MEMORAX_CODE_TEST_TRAE_AVAILABLE: traeAvailable ? "1" : "0",
     MEMORAX_CODE_TEST_FAIL_START_ONCE: failStartOnce ? "1" : "0",
+    MEMORAX_CODE_TEST_ADAPTER_START_FAILURE: adapterStartFailure ? "1" : "0",
     MEMORAX_CODE_TEST_RUNTIME_AUTHORITY_FAILURE: runtimeAuthorityFailureCode
       ?? (connectionAuthorityFailure ? "BACKEND_CONNECTION_AUTHORITY_INVALID" : ""),
     MEMORAX_CODE_TEST_UNAVAILABLE_STATUS: unavailableStatus ? "1" : "0",
@@ -813,8 +825,10 @@ test("setup fresh install auto-detects Codex and skips an unavailable Claude run
     assert.doesNotMatch(run.result.stderr, /Configure MemoraX Code for which clients/);
     assert.match(run.log, /^codex --version$/m);
     assert.match(run.result.stderr, /Claude Code runtime was not detected; skipping its adapter setup/);
+    assert.match(run.result.stderr, /DeepSeek Harness adapter: unavailable/);
+    assert.doesNotMatch(run.result.stderr, /DeepSeek Harness adapter: not ok/);
     assert.match(run.log, /^memorax-code codex-plugin install --json$/m);
-    assert.match(run.log, /^memorax-code start --clients codex,dsh$/m);
+    assert.match(run.log, /^memorax-code start --clients codex,dsh --json$/m);
     assert.match(run.log, /^memorax-code status --clients codex,dsh$/m);
     assert.match(run.log, /^dsh-adapter-optional start$/m);
     assert.match(run.log, /^dsh-adapter-optional status$/m);
@@ -839,7 +853,7 @@ test("setup fresh install auto-detects CodeBuddy and starts the WorkBuddy adapte
     assert.match(run.result.stderr, /CodeBuddy CLI: codebuddy 9\.9\.9-test/);
     assert.match(run.result.stderr, /WorkBuddy data directory: found/);
     assert.match(run.result.stderr, /Keeping CodeBuddy provider config unchanged and enabling the shared memory Hook integration/);
-    assert.match(run.log, /^memorax-code start --clients dsh,codebuddy$/m);
+    assert.match(run.log, /^memorax-code start --clients dsh,codebuddy --json$/m);
     assert.match(run.log, /^memorax-code status --clients dsh,codebuddy$/m);
     assert.match(run.result.stderr, /CodeBuddy\/WorkBuddy/);
     const config = await readFile(join(run.memoraxCodeHome, "config.toml"), "utf8");
@@ -862,7 +876,7 @@ test("setup fresh install auto-detects Trae and requests one-time Global Hooks a
     assert.match(run.result.stderr, /Trae data directory: found/);
     assert.match(run.result.stderr, /Trae application: detected/);
     assert.match(run.result.stderr, /Keeping Trae provider settings unchanged and installing the shared memory Global Hooks and Skill/);
-    assert.match(run.log, /^memorax-code start --clients dsh,trae$/m);
+    assert.match(run.log, /^memorax-code start --clients dsh,trae --json$/m);
     assert.match(run.log, /^memorax-code status --clients dsh,trae$/m);
     assert.match(run.result.stderr, /Open Trae Settings and enable Global Hooks once/);
     const config = await readFile(join(run.memoraxCodeHome, "config.toml"), "utf8");
@@ -963,7 +977,7 @@ test("setup detects memory preferences before writing MemoraX config", async () 
     assert.match(run.result.stderr, /first workspace-scoped memory request from a trusted workspace/);
     assert.match(run.result.stderr, /MemoraX memory: .*Configured/);
     assert.match(run.result.stderr, /Automatic writeback: .*Enabled/);
-    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh$/m);
+    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh --json$/m);
     assert.match(run.log, /^memorax-cli status --json --config-only$/m);
     assert.match(run.log, /^trial-provision$/m);
     assert.ok(run.log.indexOf("trial-provision") < run.log.indexOf("memorax-code start --clients codex,claude,dsh"));
@@ -1232,11 +1246,11 @@ test("setup recovers from a failed backend start and prints red diagnostics", as
   const run = await runSetup({ failStartOnce: true });
   try {
     assert.equal(run.result.code, 0, run.result.stderr);
-    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh$/m);
+    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh --json$/m);
     assert.match(run.log, /^memorax-code stop --clients codex,claude,dsh$/m);
-    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh$/m);
+    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh --json$/m);
     assert.match(run.log, /^memorax-code status --clients codex,claude,dsh$/m);
-    assert.match(run.result.stderr, /Backend start failed during setup/);
+    assert.match(run.result.stderr, /MemoraX Code start failed during setup/);
     assert.match(run.result.stderr, /\[MemoraX Code Backend\]: fake memorax-code start failure/);
     assert.match(run.result.stderr, /Attempting automatic recovery: `memorax-code stop` then `memorax-code start`/);
     assert.match(run.result.stderr, /\[MemoraX Code Backend\]: fake memorax-code stop output/);
@@ -1248,11 +1262,29 @@ test("setup recovers from a failed backend start and prints red diagnostics", as
   }
 });
 
+test("setup identifies failed client installation without restarting a recovered Backend", async () => {
+  const run = await runSetup({ traeAvailable: true, adapterStartFailure: true });
+  try {
+    assert.equal(run.result.code, 1, run.result.stderr);
+    assert.equal((run.log.match(/^memorax-code start .* --json$/gm) ?? []).length, 1);
+    assert.doesNotMatch(run.log, /^memorax-code stop(?: |$)/m);
+    assert.doesNotMatch(run.log, /^memorax-code status(?: |$)/m);
+    assert.match(run.result.stderr, /Trae adapter: not ok action=enable stage=skill-publish code=EPERM rename denied/);
+    assert.match(run.result.stderr, /Warning: Backend persistence warning code=EIO/);
+    assert.match(run.result.stderr, /Client integration setup failed; the Backend is running/);
+    assert.match(run.result.stderr, /setup remains incomplete/);
+    assert.doesNotMatch(run.result.stderr, /Backend start failed|Automatic recovery did not start the backend|Attempting automatic recovery/);
+    await assertSetupIncomplete(run);
+  } finally {
+    await rm(run.root, { recursive: true, force: true });
+  }
+});
+
 test("setup does not stop adapters after a deterministic connection authority failure", async () => {
   const run = await runSetup({ connectionAuthorityFailure: true });
   try {
     assert.equal(run.result.code, 1, run.result.stderr);
-    assert.equal((run.log.match(/^memorax-code start --clients codex,claude,dsh$/gm) ?? []).length, 1);
+    assert.equal((run.log.match(/^memorax-code start --clients codex,claude,dsh --json$/gm) ?? []).length, 1);
     assert.doesNotMatch(run.log, /^memorax-code stop(?: |$)/m);
     assert.doesNotMatch(run.log, /^memorax-code status(?: |$)/m);
     assert.match(run.result.stderr, /BACKEND_CONNECTION_AUTHORITY_INVALID/);
@@ -1330,7 +1362,7 @@ test("automatic update setup is non-interactive and preserves disabled clients",
     assert.doesNotMatch(run.result.stderr, /Enable it now\?/);
     assert.doesNotMatch(run.result.stderr, /Trust these new or changed Codex Hooks\?/);
     assert.match(run.result.stderr, /Trusted 1 new or changed MemoraX Code Codex Hook/);
-    assert.match(run.log, /^memorax-code start --clients codex$/m);
+    assert.match(run.log, /^memorax-code start --clients codex --json$/m);
     assert.match(run.log, /^memorax-code codex-plugin trust-hooks --yes .*--json$/m);
     const config = await readFile(join(run.memoraxCodeHome, "config.toml"), "utf8");
     assert.match(config, /codex = true/);
@@ -1366,7 +1398,7 @@ test("automatic update setup enables a detected client missing from legacy confi
   try {
     assert.equal(run.result.code, 0, run.result.stderr);
     assert.doesNotMatch(run.result.stderr, /Enable it now\?/);
-    assert.match(run.log, /^memorax-code start --clients codex,codebuddy,trae$/m);
+    assert.match(run.log, /^memorax-code start --clients codex,codebuddy,trae --json$/m);
     const config = await readFile(join(run.memoraxCodeHome, "config.toml"), "utf8");
     assert.match(config, /codex = true/);
     assert.match(config, /claude = false/);
@@ -1397,7 +1429,7 @@ test("automatic update setup leaves an unavailable unconfigured client undecided
   });
   try {
     assert.equal(run.result.code, 0, run.result.stderr);
-    assert.match(run.log, /^memorax-code start --clients codex$/m);
+    assert.match(run.log, /^memorax-code start --clients codex --json$/m);
     const config = await readFile(join(run.memoraxCodeHome, "config.toml"), "utf8");
     assert.equal(tomlSectionText(config, "clients"), tomlSectionText(existingConfig, "clients"));
     assert.doesNotMatch(tomlSectionText(config, "clients"), /codebuddy\s*=/);
@@ -1432,7 +1464,7 @@ test("automatic update setup preserves configured and legacy DSH client intent",
     assert.match(run.result.stderr, /Claude Code runtime was not detected; skipping its adapter setup/);
     assert.match(run.result.stderr, /OpenCode runtime or configuration was not detected; skipping its adapter setup/);
     assert.match(run.result.stderr, /CodeBuddy\/WorkBuddy runtime was not detected; skipping its adapter setup/);
-    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh,opencode,codebuddy$/m);
+    assert.match(run.log, /^memorax-code start --clients codex,claude,dsh,opencode,codebuddy --json$/m);
     assert.match(run.log, /^memorax-code status --clients codex,claude,dsh,opencode,codebuddy$/m);
     await assertSetupComplete(run);
   } finally {

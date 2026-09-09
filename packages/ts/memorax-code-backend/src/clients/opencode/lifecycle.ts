@@ -20,7 +20,15 @@ export const openCodeAdapterLifecycle = {
         openCodeAdapterOptions(argv, serviceOptions.home, backendUrl),
       );
     } catch (error) {
-      return { ok: false, action: "enable", error: error instanceof Error ? error.message : String(error) };
+      return {
+        ok: false,
+        action: "enable",
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && "stage" in error && typeof error.stage === "string"
+          ? { stage: error.stage } : {}),
+        ...(error instanceof Error && "code" in error && typeof error.code === "string"
+          ? { errorCode: error.code } : {}),
+      };
     }
   },
   async disable({ argv, serviceOptions }) {

@@ -73,6 +73,53 @@ test("reconcile performs one stop-start recovery for an ordinary start failure",
   assert.deepEqual(calls, ["start", "stop", "start", "status", "isReady"]);
 });
 
+test("reconcile leaves recovered Backend running when client setup failed", async () => {
+  const calls = [];
+  const events = [];
+  const result = await reconcileSetup({
+    start: async () => {
+      calls.push("start");
+      return {
+        status: 1,
+        stdout: JSON.stringify({
+          ok: false,
+          action: "start",
+          backend: { ok: true, reason: "trae_adapter_enable_failed_backend_recovered" },
+          traeAdapter: { ok: false, action: "enable", error: "EPERM: rename" },
+        }),
+      };
+    },
+    stop: async () => { calls.push("stop"); return succeeded; },
+    status: async () => { calls.push("status"); return succeeded; },
+    isReady: async () => { calls.push("ready"); return true; },
+    onEvent: (event) => events.push(event),
+  });
+
+  assert.deepEqual(result, { status: "not-verified", reason: "adapter-setup-failed" });
+  assert.deepEqual(calls, ["start"]);
+  assert.equal(events.find((event) => event.type === "start-failed").reason, "adapter-setup-failed");
+});
+
+test("reconcile retains recovery when a failure report cannot establish healthy Backend and client failure", async () => {
+  for (const report of [
+    "not JSON",
+    { ok: false, action: "start", backend: { ok: false }, traeAdapter: { ok: false } },
+    { ok: false, action: "start", backend: { ok: true, skipped: true }, traeAdapter: { ok: false } },
+    { ok: false, action: "start", backend: { ok: true }, unknownAdapter: { ok: false } },
+  ]) {
+    const calls = [];
+    const starts = [{ status: 1, stdout: typeof report === "string" ? report : JSON.stringify(report) }, succeeded];
+    const result = await reconcileSetup({
+      start: async () => { calls.push("start"); return starts.shift(); },
+      stop: async () => { calls.push("stop"); return succeeded; },
+      status: async () => { calls.push("status"); return succeeded; },
+      isReady: async () => true,
+    });
+    assert.deepEqual(calls, ["start", "stop", "start", "status"], JSON.stringify(report));
+    assert.equal(result.recovered, true);
+  }
+});
+
 test("reconcile reports a failed recovery without a second stop", async () => {
   const calls = [];
 

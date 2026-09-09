@@ -1,7 +1,9 @@
 import { strict as assert } from "node:assert";
+import fs from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { basename, join, win32 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import { withJsonFileLockAsync } from "../../memorax-code-adapter-common/src/config-utils.mjs";
@@ -20,8 +22,10 @@ import {
 import { writeTraeRuntimeObservation } from "../src/runtime-observation.mjs";
 
 test("Trae home and application discovery honor explicit and platform locations", () => {
-  assert.equal(defaultTraeHome({ TRAE_CN_HOME: "/custom/trae" }, "/home/user"), "/custom/trae");
-  assert.equal(defaultTraeHome({}, "/home/user"), "/home/user/.trae-cn");
+  const home = join(tmpdir(), "trae-discovery-home");
+  const customHome = join(home, "custom-trae");
+  assert.equal(defaultTraeHome({ TRAE_CN_HOME: customHome }, home), customHome);
+  assert.equal(defaultTraeHome({}, home), join(home, ".trae-cn"));
   assert.equal(traeInstallationDetected({
     env: {},
     home: "/home/user",
@@ -144,7 +148,7 @@ test("Trae install merges managed Hooks and Skill without changing user Hooks", 
     for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
       const managed = hooks.hooks[event]
         .flatMap((group) => group.hooks ?? [])
-        .filter((hook) => hook.command?.includes("--memorax-code-trae-hook-v1"));
+        .filter((hook) => hookScript(hook.command).includes("--memorax-code-trae-hook-v1"));
       assert.equal(managed.length, 1);
     }
 
@@ -249,6 +253,69 @@ test("Trae runtime generations track recovery metadata without mutating previous
   }
 });
 
+test("Trae directory publication retries Windows contention and reports exhausted failures", async () => {
+  const fixture = await createFixture("directory-contention");
+  const options = { ...fixture.options, platform: process.platform };
+  const skillPath = join(fixture.traeHome, "skills", "memorax-code");
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalRename = fs.renameSync;
+  const originalRemove = fs.rmSync;
+  const publishError = Object.assign(new Error("directory publication denied"), { code: "EPERM" });
+  let persistent = false;
+  let runtimeRenames = 0;
+  let skillRenames = 0;
+  let skillRemovals = 0;
+  fs.renameSync = (source, destination) => {
+    if (basename(source).startsWith(".staging-") && ++runtimeRenames === 1) throw publishError;
+    if (destination === skillPath && (++skillRenames === 1 || persistent)) throw publishError;
+    return originalRename(source, destination);
+  };
+  fs.rmSync = (target, ...args) => {
+    if (target === skillPath && ++skillRemovals === 1) {
+      throw Object.assign(new Error("directory removal busy"), { code: "EBUSY" });
+    }
+    if (persistent && target.startsWith(`${skillPath}.tmp-`) && fs.existsSync(target)) {
+      throw Object.assign(new Error("stage cleanup failed"), { code: "EIO" });
+    }
+    return originalRemove(target, ...args);
+  };
+  Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+  syncBuiltinESMExports();
+  try {
+    const installed = await enableTraeAdapter(options);
+    assert.equal(installed.ok, true, installed.error);
+    assert.equal(await readFile(join(skillPath, "SKILL.md"), "utf8"), "# MemoraX Code\n");
+    assert.deepEqual([runtimeRenames, skillRenames, skillRemovals], [2, 2, 2]);
+    assert.equal((await enableTraeAdapter(options)).changed, false);
+    assert.deepEqual([runtimeRenames, skillRenames, skillRemovals], [2, 2, 2]);
+
+    await writeFile(join(options.skillSourcePath, "SKILL.md"), "# Updated Skill\n");
+    persistent = true;
+    const failed = await enableTraeAdapter(options);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.action, "enable");
+    assert.equal(failed.reason, "install_failed");
+    assert.equal(failed.stage, "skill-publish");
+    assert.equal(failed.errorCode, "EPERM");
+    assert.equal(failed.error, publishError.message);
+    assert.equal(skillRenames, 7, "persistent contention must stop after the bounded retries");
+    assert.equal((await readTraeAdapterStatus(options)).reason, "install_incomplete");
+    const state = JSON.parse(await readFile(installed.statePath, "utf8"));
+    assert.equal(state.enabled, false);
+    assert.equal(state.installPending, true);
+
+    persistent = false;
+    assert.equal((await enableTraeAdapter(options)).ok, true);
+    assert.equal(await readFile(join(skillPath, "SKILL.md"), "utf8"), "# Updated Skill\n");
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    fs.renameSync = originalRename;
+    fs.rmSync = originalRemove;
+    syncBuiltinESMExports();
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("Trae install resumes from a persisted ownership intent", async () => {
   const fixture = await createFixture("install-recovery");
   try {
@@ -304,6 +371,7 @@ test("Trae install leaves shared artifacts unchanged when ownership intent canno
 
 test("Trae lifecycle mutations wait for the shared cross-process lock", async () => {
   const fixture = await createFixture("lifecycle-lock");
+  const originalHooks = await readFile(join(fixture.traeHome, "hooks.json"), "utf8");
   let releaseLock;
   let holder;
   let pendingInstall;
@@ -320,7 +388,7 @@ test("Trae lifecycle mutations wait for the shared cross-process lock", async ()
     pendingInstall = enableTraeAdapter(fixture.options);
     await delay(50);
     const blockedHooks = await readFile(join(fixture.traeHome, "hooks.json"), "utf8");
-    assert.equal(blockedHooks.includes("--memorax-code-trae-hook-v1"), false);
+    assert.equal(blockedHooks, originalHooks);
 
     releaseLock();
     releaseLock = undefined;
@@ -348,7 +416,9 @@ test("Trae disable and removal delete only MemoraX-managed content", async () =>
     assert.equal(disabled.ok, true);
     assert.equal(disabled.enabled, false);
     const disabledHooks = JSON.parse(await readFile(join(fixture.traeHome, "hooks.json"), "utf8"));
-    assert.equal(JSON.stringify(disabledHooks).includes("--memorax-code-trae-hook-v1"), false);
+    assert.equal(Object.values(disabledHooks.hooks).flatMap((groups) => groups)
+      .flatMap((group) => group.hooks ?? [])
+      .some((hook) => hookScript(hook.command).includes("--memorax-code-trae-hook-v1")), false);
     assert.equal(disabledHooks.hooks.UserPromptSubmit[0].hooks[0].command, "user-command");
     assert.equal(await readFile(join(installed.skillPath, "SKILL.md"), "utf8"), "# MemoraX Code\n");
 
@@ -453,4 +523,8 @@ function decodePowerShellCommand(command) {
   const encoded = / -EncodedCommand ([A-Za-z0-9+/=]+)$/.exec(command)?.[1];
   assert.ok(encoded, command);
   return Buffer.from(encoded, "base64").toString("utf16le");
+}
+
+function hookScript(command = "") {
+  return command.includes("-EncodedCommand") ? decodePowerShellCommand(command) : command;
 }

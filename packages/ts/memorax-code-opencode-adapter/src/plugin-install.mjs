@@ -18,6 +18,7 @@ import {
   readAdapterState,
   stringOption,
 } from "../../memorax-code-adapter-common/src/config-utils.mjs";
+import { withWindowsDirectoryRetry } from "../../memorax-code-adapter-common/src/windows-directory-retry.mjs";
 import { DEFAULT_BACKEND_URL as BACKEND_DEFAULT } from "../../memorax-code-adapter-common/src/backend-connection.mjs";
 import {
   adapterStatePath,
@@ -543,16 +544,25 @@ function createManagedRepoMemoryHelperLoader(paths, sourceSha256) {
 function materializeSkill(sourcePath, targetPath, memoraxCodeCommand) {
   mkdirSync(dirname(targetPath), { recursive: true });
   const stagePath = `${targetPath}.tmp-${process.pid}-${randomUUID()}`;
+  let stage = "skill-stage";
   try {
     cpSync(sourcePath, stagePath, { recursive: true });
     atomicWriteJson(
       join(stagePath, SKILL_PACKAGE_METADATA),
       skillPackageMetadata(memoraxCodeCommand),
     );
-    rmSync(targetPath, { recursive: true, force: true });
-    renameSync(stagePath, targetPath);
-  } finally {
-    rmSync(stagePath, { recursive: true, force: true });
+    stage = "skill-remove";
+    withWindowsDirectoryRetry(() => rmSync(targetPath, { recursive: true, force: true }));
+    stage = "skill-publish";
+    withWindowsDirectoryRetry(() => renameSync(stagePath, targetPath));
+  } catch (error) {
+    try {
+      withWindowsDirectoryRetry(() => rmSync(stagePath, { recursive: true, force: true }));
+    } catch {
+      // Preserve the installation failure if Windows also blocks stage cleanup.
+    }
+    error.stage = stage;
+    throw error;
   }
 }
 

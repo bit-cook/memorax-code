@@ -117,6 +117,16 @@ failure. For older installations with a complete configuration, the
 no-argument command can perform a one-time migration; see
 [setup-completion behavior](configuration.md#setup-automatic-update-and-package-transition-state).
 
+On Windows, shared Hook runtime publication and Trae/OpenCode directory
+installation briefly retry transient filesystem errors. If shared runtime
+publication still fails, setup stops before changing the active runtime or
+client integrations. If an adapter operation still fails, setup identifies the client,
+installation step, and error. When the Backend has already recovered, setup
+leaves it running instead of adding another stop/start cycle; client setup
+remains incomplete. Check access to the reported directory, close applications
+that may be using it, then rerun `memorax-code setup`. A running Backend alone
+does not confirm that every selected client integration is ready.
+
 If secure credential setup fails, confirm that the operating-system credential
 backend is available to the same logged-in user and that the MemoraX service is
 reachable. On Linux, confirm that `/usr/bin/secret-tool` is installed and the

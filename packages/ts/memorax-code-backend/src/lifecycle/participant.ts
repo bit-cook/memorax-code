@@ -29,6 +29,8 @@ export type AdapterReport = {
   reason?: string;
   message?: string;
   error?: string;
+  errorCode?: string;
+  stage?: string;
   memoraxCodeHome?: string;
   codexHome?: string;
   openCodeConfigDir?: string;
