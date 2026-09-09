@@ -81,7 +81,6 @@ await ensureBackendAvailable({
   buildStartArgs: (homes, recoveryArguments) => [
     "start",
     "--home", homes.memoraxCodeHome,
-    "--clients", "trae",
     "--trae-home", homes.traeHome,
     ...recoveryArguments,
   ],

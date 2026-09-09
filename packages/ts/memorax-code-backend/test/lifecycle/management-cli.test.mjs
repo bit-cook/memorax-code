@@ -495,6 +495,95 @@ test("unqualified Backend recovery preserves both configured client integrations
   }
 });
 
+test("client Hook recovery preserves managed integrations and respects explicit stops", { timeout: 60_000 }, async (t) => {
+  for (const client of ["codebuddy", "trae"]) {
+    await t.test(client, { timeout: 30_000 }, async () => {
+      const root = await mkdtemp(join(tmpdir(), `memorax-code-${client}-shared-recovery-`));
+      const home = join(root, "memorax-code-home");
+      const clientHome = join(root, `${client}-home`);
+      const claudeHome = join(root, "claude-home");
+      const cliPath = fileURLToPath(new URL("../../dist/memorax-code.js", import.meta.url));
+      const port = await freePort();
+      await mkdir(clientHome, { recursive: true });
+      await mkdir(claudeHome, { recursive: true });
+      const claudeCli = await prepareClaudePluginCli(home);
+      await writeFile(join(claudeHome, "settings.json"), "{}\n");
+      const configPath = join(home, "config.toml");
+      const config = [
+        "[clients]", "codex = false", "claude = false", "dsh = false", "opencode = false",
+        `${client} = true`, "",
+      ].join("\n");
+      await writeFile(configPath, config);
+      const env = {
+        MEMORAX_CODE_HOME: home,
+        MEMORAX_CODE_BACKEND_URL: `http://127.0.0.1:${port}`,
+        MEMORAX_CODE_COMMAND: cliPath,
+        CODEBUDDY_HOME: clientHome,
+        TRAE_HOME: clientHome,
+        TRAE_CN_HOME: clientHome,
+        CLAUDE_CONFIG_DIR: claudeHome,
+        FAKE_CLAUDE_PLUGIN_CALLS: claudeCli.callsPath,
+        MEMORAX_CODE_CLAUDE_COMMAND: claudeCli.claudeCommand,
+      };
+      const commonArgs = [
+        "--home", home, "--port", String(port),
+        `--${client}-home`, clientHome, "--claude-home", claudeHome,
+      ];
+      const activeClientsPath = join(home, "runtime", "backend", "managed-clients.json");
+      try {
+        const started = await runCli(cliPath, [
+          "start", "--json", ...commonArgs, "--clients", `${client},claude`,
+        ], { env });
+        assert.equal(started.code, 0, `${started.stdout}\n${started.stderr}`);
+        const startReport = JSON.parse(started.stdout);
+        assert.equal(startReport.claudeAdapter.enabled, true);
+        const adapter = startReport[`${client}Adapter`];
+        assert.equal(adapter.enabled, true);
+        const hookPath = client === "codebuddy"
+          ? join(adapter.marketplacePath, "hooks", "runtime-hook.mjs")
+          : join(adapter.installPath, "runtime-hook.mjs");
+        for (const phase of ["active", "stopped", "configured"]) {
+          if (phase === "stopped") {
+            await writeFile(configPath, config.replace("claude = false", "claude = true"));
+            const stopped = await runCli(cliPath, [
+              "stop", "--json", ...commonArgs, "--clients", "claude",
+            ], { env });
+            assert.equal(stopped.code, 0, `${stopped.stdout}\n${stopped.stderr}`);
+          }
+          const backendOnlyStop = await runCli(cliPath, [
+            "stop", "--json", ...commonArgs, "--clients", "none",
+          ], { env });
+          assert.equal(backendOnlyStop.code, 0, `${backendOnlyStop.stdout}\n${backendOnlyStop.stderr}`);
+          if (phase === "configured") await rm(activeClientsPath);
+          const recovered = await runCli(hookPath, [], {
+            env,
+            input: JSON.stringify({
+              hook_event_name: "SessionStart", session_id: `${client}-${phase}`,
+              transcript_path: join(root, "session.jsonl"), source: "startup", cwd: root,
+            }),
+          });
+          assert.equal(recovered.code, 0, `${recovered.stdout}\n${recovered.stderr}`);
+          const status = await runCli(cliPath, [
+            "status", "--json", ...commonArgs, "--clients", `${client},claude`,
+          ], { env });
+          const report = JSON.parse(status.stdout);
+          assert.equal(report.backend.ok, true, `${phase}: ${status.stdout}\n${status.stderr}`);
+          assert.equal(report[`${client}Adapter`].enabled, true, phase);
+          assert.equal(report.claudeAdapter.enabled, phase !== "stopped", phase);
+          assert.deepEqual(JSON.parse(await readFile(activeClientsPath, "utf8")), {
+            codex: false, claude: phase !== "stopped", dsh: false, opencode: false, [client]: true,
+          }, phase);
+        }
+      } finally {
+        await runCli(cliPath, [
+          "stop", "--json", ...commonArgs, "--clients", `${client},claude`,
+        ], { env });
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test("partial client stop preserves Backend until an explicit Backend-only stop", async () => {
   const home = await mkdtemp(join(tmpdir(), "memorax-code-clients-partial-home-"));
   const codexHome = await mkdtemp(join(tmpdir(), "memorax-code-clients-partial-codex-"));
@@ -632,13 +721,18 @@ test("memorax-code lifecycle rejects invalid config before mutating clients or B
     const activeClients = { codex: false, claude: true, dsh: false, opencode: false };
     await mkdir(join(home, "runtime", "backend"), { recursive: true });
     await writeFile(activeClientsPath, `${JSON.stringify(activeClients)}\n`);
-    const replacement = await runCli(cliPath, ["start", "--json", ...commonArgs], {
-      env: { ...env, MEMORAX_CODE_PACKAGE_REPLACEMENT: "1" },
-    });
-    assert.equal(replacement.code, 1, `${replacement.stdout}\n${replacement.stderr}`);
-    assert.match(replacement.stderr, /failed to parse MemoraX Code lifecycle config/);
-    assert.deepEqual(JSON.parse(await readFile(activeClientsPath, "utf8")), activeClients);
-    assert.equal(await pathExists(join(home, "runtime", "backend", "backend.pid.json")), false);
+    for (const recovery of [
+      { args: [], env: { ...env, MEMORAX_CODE_PACKAGE_REPLACEMENT: "1" } },
+      { args: ["--preserve-clients"], env },
+    ]) {
+      const result = await runCli(cliPath, ["start", "--json", ...commonArgs, ...recovery.args], {
+        env: recovery.env,
+      });
+      assert.equal(result.code, 1, `${result.stdout}\n${result.stderr}`);
+      assert.match(result.stderr, /failed to parse MemoraX Code lifecycle config/);
+      assert.deepEqual(JSON.parse(await readFile(activeClientsPath, "utf8")), activeClients);
+      assert.equal(await pathExists(join(home, "runtime", "backend", "backend.pid.json")), false);
+    }
   } finally {
     await runCli(cliPath, ["stop", "--json", ...commonArgs, "--clients", "none"], { env });
     await rm(home, { recursive: true, force: true });

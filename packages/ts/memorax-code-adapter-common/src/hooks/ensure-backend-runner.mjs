@@ -62,7 +62,7 @@ export async function ensureBackendAvailable(options, input = {}) {
       if (recoveryArguments === undefined || remainingStartMs <= 0 || !memoraxCodeCommandAvailable(command.value)) return;
       const result = await runMemoraxCode(
         command.value,
-        options.buildStartArgs(homes, recoveryArguments),
+        [...options.buildStartArgs(homes, recoveryArguments), "--preserve-clients"],
         remainingStartMs,
         options.nodePath,
         recoveryEnvironment(options.recoveryEnv, metadata),
