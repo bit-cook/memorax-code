@@ -423,10 +423,16 @@ Important distinctions:
   recognizer, and both Hook and registered cwd must remain inside that root
   without intervening Git authority. Recovery runs within session serialization,
   never replaces a live binding, and does not depend on retained trace records.
+  A General session that initially has no cwd may acquire its first physical
+  root only when the corresponding client default-directory recognizer validates
+  that root and Git resolution still yields General. This one-time completion
+  preserves the remote namespace and pending QA, including a Turn whose cwd
+  first arrives at Stop; subsequent changes to the bound root remain mismatches.
 - A malformed or incomplete direct `.git` directory is the sole documented
   folder-scope fallback. That degraded scope may upgrade in-session only to a
   verified Git scope with the same Base User ID and canonical workspace root;
-  for a fixed Base User ID, other scope changes remain mismatches. A changed
+  for a fixed Base User ID, other scope changes beyond the General first-root
+  completion above remain mismatches. A changed
   Base User ID requires a new binding; existing Turn metadata remains subject
   to the coordinator's scope validation.
 - Local mode may authorize loopback requests without a configured token. Token
@@ -514,6 +520,9 @@ bridge is unavailable. Without that context,
 standalone commands resolve their working directory. General changes the
 remote namespace for subsequent operations; it neither migrates old memory nor
 searches both the old and new namespaces.
+Even when the current Turn has a projectless hint without cwd, the CLI validates
+its command directory before using General. Git scope conflicts and unreadable
+paths reject the operation before any provider request.
 
 After a degraded direct `.git` directory is repaired, each CLI operation
 resolves the verified Git scope immediately; no client-session restart is

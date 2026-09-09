@@ -1,8 +1,14 @@
 import {
+  isCodexManagedTaskWorkspace,
+  isOpenCodeDefaultWorkspace,
+  resolveWorkBuddyWorkspaceKind,
+} from "../../../memorax-code-adapter-common/src/default-workspace.mjs";
+import {
   memoraxConfigFromEnv,
   type MemoraxAdapterConfig,
 } from "../provider/memorax/config.js";
 import {
+  repositoryMemoryScopeCanBindGeneralWorkspace,
   repositoryMemoryScopeCanUpgradeFromDegradedGit,
   repositoryMemoryScopeContainsWorkspace,
   repositoryMemoryScopeKind,
@@ -192,6 +198,15 @@ export async function resolveConfiguredRepositoryMemoryForSession(
     }
     if (cached?.scope.baseUserId === configResult.config.userId) {
       if (!repositoryMemoryScopesMatch(cached.scope, scopeResult.scope)) {
+        if (
+          repositoryMemoryScopeCanBindGeneralWorkspace(cached.scope, scopeResult.scope)
+          && isClientDefaultWorkspace(input.client, scopeResult.scope.boundWorkspaceRoot, env)
+        ) {
+          // A historical projectless hint alone cannot authorize an arbitrary cwd.
+          // General's remote namespace is unchanged, so pending QA stays valid.
+          cached.scope = scopeResult.scope;
+          return { ok: true, memory: { config: configResult.config, scope: cached.scope } };
+        }
         if (repositoryMemoryScopeCanUpgradeFromDegradedGit(cached.scope, scopeResult.scope)) {
           // The writeback owner uses this synchronous callback to discard pending
           // folder-scoped turns before the Git binding becomes visible.
@@ -212,6 +227,19 @@ export async function resolveConfiguredRepositoryMemoryForSession(
     scopes.set(bindingKey, { scope: scopeResult.scope, mismatch: false });
     return { ok: true, memory: { config: configResult.config, scope: scopeResult.scope } };
   });
+}
+
+function isClientDefaultWorkspace(
+  client: MemoryHookClient,
+  cwd: string | undefined,
+  env: Record<string, string | undefined>,
+): boolean {
+  switch (client) {
+    case "codex": return isCodexManagedTaskWorkspace(cwd, { env });
+    case "codebuddy": return resolveWorkBuddyWorkspaceKind({ cwd }, { env }) === "projectless";
+    case "opencode": return isOpenCodeDefaultWorkspace(cwd, { env });
+    default: return false;
+  }
 }
 
 function repositoryScopeMismatch(): ConfiguredRepositoryMemoryResult {

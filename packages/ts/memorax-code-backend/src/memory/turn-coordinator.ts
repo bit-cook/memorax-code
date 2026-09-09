@@ -7,6 +7,7 @@ import type {
 } from "./automatic-writeback.js";
 import type { ConfiguredRepositoryMemoryResult } from "./repository-session.js";
 import {
+  repositoryMemoryScopeCanBindGeneralWorkspace,
   repositoryMemoryScopeCanUpgradeFromDegradedGit,
   repositoryMemoryScopesMatch,
   type RepositoryMemoryScope,
@@ -175,9 +176,14 @@ export function createMemoryTurnCoordinator(options: MemoryTurnCoordinatorOption
         input.metadata?.repositoryScope
         && !repositoryMemoryScopesMatch(input.metadata.repositoryScope, currentScope)
       ) {
-        if (!repositoryMemoryScopeCanUpgradeFromDegradedGit(input.metadata.repositoryScope, currentScope)) {
+        if (
+          !repositoryMemoryScopeCanUpgradeFromDegradedGit(input.metadata.repositoryScope, currentScope)
+          && !repositoryMemoryScopeCanBindGeneralWorkspace(input.metadata.repositoryScope, currentScope)
+        ) {
           return reject("workspace_scope_mismatch");
         }
+        // First-cwd binding was validated by the session resolver; preserve this
+        // same Turn's QA while adopting the newly established physical root.
         repositoryScope = currentScope;
       }
       const userTimestamp = parseNativeMessageTimestamp(input.userTimestamp);

@@ -436,19 +436,22 @@ test("memory CLI preserves projectless turn scope across trace settings", async 
   }
 });
 
-test("memory CLI uses General when a projectless current turn has no cwd", async () => {
+test("memory CLI validates command cwd before using a projectless turn without cwd", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-cli-projectless-no-cwd-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const memoraxCodeHome = join(root, "memorax-code-home");
   const commandWorkspace = join(root, "arbitrary-command-workspace");
+  const repository = join(root, "repository");
   await mkdir(commandWorkspace, { recursive: true });
+  await createRepositoryMetadata(repository, "My-Project");
   await writeCurrentCodexTurn(traceContextFromHookBody({
     session_id: "session-projectless-no-cwd",
     turn_id: "turn-projectless-no-cwd",
     workspace_kind: "projectless",
   }), { memoraxCodeHome });
 
-  const result = await runMemoryCli(["status"], {
-    cwd: commandWorkspace,
+  const requests = [];
+  const options = {
     env: {
       CODEX_THREAD_ID: "session-projectless-no-cwd",
       MEMORAX_CODE_HOME: memoraxCodeHome,
@@ -456,12 +459,38 @@ test("memory CLI uses General when a projectless current turn has no cwd", async
       MEMORAX_CODE_MEMORAX_API_KEY: "secret",
       MEMORAX_CODE_MEMORAX_USER_ID: "user-1",
     },
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.scopeKind, "general");
-  assert.equal(result.workspace, "General");
-  assert.equal(result.effectiveUserId, "user-1@General");
+    fetchImpl: async (url, init) => {
+      requests.push(JSON.parse(init.body));
+      const data = String(url).endsWith("/add") ? { task_id: "general-add", status: "queued" } : { data: [] };
+      return new Response(JSON.stringify({ success: true, data }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  };
+  for (const [cwd, failureReason] of [
+    [commandWorkspace, undefined],
+    [repository, "workspace_scope_mismatch"],
+    [join(root, "missing"), "workspace_scope_unavailable"],
+  ]) {
+    const requestCount = requests.length;
+    for (const args of [
+      ["search", "--query", "Keep General within a verified non-Git workspace."],
+      ["add", "--memory", "Shared preference.", "--type", "preference", "--reason", "Explicit test save."],
+    ]) {
+      const result = await runMemoryCli(args, { ...options, cwd });
+      assert.equal(result.ok, failureReason === undefined, `${args[0]} in ${cwd}`);
+      if (failureReason) {
+        assert.equal(result.workspaceScopeReason, failureReason);
+      } else {
+        assert.equal(result.scopeKind, "general");
+        assert.equal(result.workspace, "General");
+        assert.equal(result.effectiveUserId, "user-1@General");
+      }
+    }
+    assert.equal(requests.length - requestCount, failureReason ? 0 : 2);
+  }
+  assert.deepEqual(requests.map((request) => request.user_id), ["user-1@General", "user-1@General"]);
 });
 
 test("memory CLI blocks a cwd outside the current Codex turn scope", async () => {

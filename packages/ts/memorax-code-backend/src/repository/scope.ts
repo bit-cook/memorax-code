@@ -143,6 +143,20 @@ export function repositoryMemoryScopeCanUpgradeFromDegradedGit(
     && previous.boundWorkspaceRoot === current.boundWorkspaceRoot;
 }
 
+// The session resolver separately validates the client's first default directory.
+// This transition adds local authority without changing the remote namespace.
+export function repositoryMemoryScopeCanBindGeneralWorkspace(
+  previous: RepositoryMemoryScope,
+  current: RepositoryMemoryScope,
+): boolean {
+  return previous.scopeKind === "general"
+    && previous.boundWorkspaceRoot === undefined
+    && current.scopeKind === "general"
+    && current.boundWorkspaceRoot !== undefined
+    && previous.baseUserId === current.baseUserId
+    && previous.effectiveUserId === current.effectiveUserId;
+}
+
 export async function repositoryMemoryScopeContainsWorkspace(
   scope: RepositoryMemoryScope,
   workspaceRoot: string | undefined,

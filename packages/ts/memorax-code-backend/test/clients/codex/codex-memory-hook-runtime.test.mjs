@@ -643,6 +643,70 @@ test("memory hook and nested Skill commands share General across Codex projectle
   }
 });
 
+test("Codex binds a cwd-less General turn once before native writeback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-general-bind-"));
+  const workspace = join(root, "Documents", "Codex", "2026-09-09", "task");
+  const nested = join(workspace, "nested");
+  const other = join(root, "Documents", "Codex", "2026-09-09", "other");
+  const ordinary = join(root, "ordinary");
+  await Promise.all([nested, other, ordinary].map((path) => mkdir(path, { recursive: true })));
+  const { fetchImpl, requests } = memoraxAddFetch();
+  const env = {
+    ...WRITEBACK_ENV, HOME: root, USERPROFILE: root,
+    MEMORAX_CODE_HOME: join(root, "state"),
+    MEMORAX_CODE_CODEX_TRACE_ENABLED: "false",
+  };
+  const controller = createCodexMemoryHookRuntime({ env, fetchImpl, memoraxCodeHome: env.MEMORAX_CODE_HOME });
+  try {
+    for (const [sessionId, cwd, accepted] of [["bind-default", workspace, true], ["reject-ordinary", ordinary, false]]) {
+      const transcriptPath = await writeRollout(root, sessionId, [
+        { turnId: "first", prompt: "Keep this general preference.", reply: "The preference is recorded." },
+        { turnId: "next", prompt: "Continue the same task.", reply: "The scope stays bound." },
+      ]);
+      await controller.recordTurnStart({
+        sessionId, turnId: "first", prompt: "Keep this general preference.",
+        workspaceKind: "projectless", transcriptPath,
+      });
+      const before = requests.length;
+      const completed = await controller.writeback({
+        sessionId, turnId: "first", cwd, transcriptPath,
+        lastAssistantMessage: "The preference is recorded.",
+      });
+      if (!accepted) {
+        assert.deepEqual(completed, { ok: true, scheduled: false, reason: "workspace_scope_mismatch" });
+        assert.equal(requests.length, before, "an ordinary cwd cannot inherit an unbound General hint");
+        continue;
+      }
+      assert.deepEqual(completed, { ok: true, scheduled: true });
+      await waitFor(() => requests.length === before + 1, "first cwd binding lost the current QA");
+      assert.equal(requests[before].body.user_id, "user-1@General");
+      assert.deepEqual(requests[before].body.messages.map(({ role, content, timestamp }) => ({ role, content, timestamp })), [
+        { role: "user", content: "Keep this general preference.", timestamp: Date.parse("2026-07-16T00:00:02.000Z") },
+        { role: "assistant", content: "The preference is recorded.", timestamp: Date.parse("2026-07-16T00:00:03.000Z") },
+      ]);
+      await controller.recordTurnStart({
+        sessionId, turnId: "next", prompt: "Continue the same task.", cwd: nested, transcriptPath,
+      });
+      assert.deepEqual(await controller.writeback({
+        sessionId, turnId: "next", cwd: nested, transcriptPath, lastAssistantMessage: "The scope stays bound.",
+      }), { ok: true, scheduled: true });
+      await waitFor(() => requests.length === before + 2, "bound General did not survive the next nested turn");
+      assert.equal(requests[before + 1].body.user_id, "user-1@General");
+      await controller.recordTurnStart({
+        sessionId, turnId: "next", prompt: "Continue the same task.",
+        cwd: other, workspaceKind: "projectless", transcriptPath,
+      });
+      assert.deepEqual(await controller.writeback({
+        sessionId, turnId: "next", cwd: other, transcriptPath, lastAssistantMessage: "The scope stays bound.",
+      }), { ok: true, scheduled: false, reason: "workspace_scope_mismatch" });
+      assert.equal(requests.length, before + 2, "an established General root cannot be replaced");
+    }
+  } finally {
+    controller.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Codex General recovery respects the native header and existing local bindings", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-native-scope-"));
   const workspace = join(root, "Documents", "Codex", "2026-09-08", "task");

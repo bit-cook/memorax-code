@@ -286,25 +286,31 @@ async function resolveMemoryCliRepositoryMemory(options: MemoryCliOptions): Prom
   }
 
   const commandWorkspace = options.cwd ?? process.cwd();
+  const unboundGeneral = turnMemory?.ok
+    && turnMemory.memory.scope?.scopeKind === "general"
+    && !turnMemory.memory.scope.boundWorkspaceRoot;
   if (turnMemory?.ok && turnMemory.memory.scope) {
     const turnScope = turnMemory.memory.scope;
     const turnScopeKind = repositoryMemoryScopeKind(turnScope);
     if (
-      (turnScopeKind === "general" && !turnScope.boundWorkspaceRoot)
-      || (
-        (turnScopeKind === "general" || turnScopeKind === "local-directory")
-        && await repositoryMemoryScopeContainsWorkspace(turnScope, commandWorkspace)
-      )
+      (turnScopeKind === "general" || turnScopeKind === "local-directory")
+      && await repositoryMemoryScopeContainsWorkspace(turnScope, commandWorkspace)
     ) {
       return turnMemory;
     }
   }
   const commandMemory = await resolveConfiguredRepositoryMemory({
     workspaceRoot: commandWorkspace,
+    // A cwd-less projectless turn still requires a readable, non-Git command
+    // directory. Resolve the hint normally so Git authority cannot be bypassed.
+    workspaceKind: unboundGeneral ? "projectless" : undefined,
     memoraxCodeHome,
     env,
   });
   if (!commandMemory.ok || !commandMemory.memory.scope) return commandMemory;
+  if (unboundGeneral && repositoryMemoryScopeKind(commandMemory.memory.scope) === "general") {
+    return commandMemory;
+  }
   if (turnMemory?.ok && (!turnMemory.memory.scope || !repositoryMemoryScopesMatch(commandMemory.memory.scope, turnMemory.memory.scope))) {
     const clientLabel = traceClientLabel(traceBinding?.client);
     return {
