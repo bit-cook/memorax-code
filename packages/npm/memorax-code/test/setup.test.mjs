@@ -180,6 +180,7 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     "backend-connection.mjs",
     "hooks/capture-cwd-hook.mjs",
     "hooks/client-hook-launcher.mjs",
+    "windows-directory-retry.mjs",
     "clients/codex-plugin-artifact.mjs",
     "automatic-update-state.mjs",
     "config-utils.mjs",

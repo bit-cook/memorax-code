@@ -117,8 +117,10 @@ failure. For older installations with a complete configuration, the
 no-argument command can perform a one-time migration; see
 [setup-completion behavior](configuration.md#setup-automatic-update-and-package-transition-state).
 
-On Windows, Trae and OpenCode directory installation briefly retries transient
-filesystem errors. If an operation still fails, setup identifies the client,
+On Windows, shared Hook runtime publication and Trae/OpenCode directory
+installation briefly retry transient filesystem errors. If shared runtime
+publication still fails, setup stops before changing the active runtime or
+client integrations. If an adapter operation still fails, setup identifies the client,
 installation step, and error. When the Backend has already recovered, setup
 leaves it running instead of adding another stop/start cycle; client setup
 remains incomplete. Check access to the reported directory, close applications

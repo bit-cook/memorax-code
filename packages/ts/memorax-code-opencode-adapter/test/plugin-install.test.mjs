@@ -18,15 +18,18 @@ import {
 } from "../src/plugin-install.mjs";
 
 test("OpenCode config discovery honors its explicit and XDG homes", () => {
+  const home = join(tmpdir(), "opencode-discovery-home");
+  const customHome = join(home, "custom-opencode");
+  const xdgHome = join(home, "xdg-config");
   assert.equal(
-    defaultOpenCodeConfigDir({ OPENCODE_CONFIG_DIR: "/custom/opencode", XDG_CONFIG_HOME: "/ignored" }, "/home/user"),
-    "/custom/opencode",
+    defaultOpenCodeConfigDir({ OPENCODE_CONFIG_DIR: customHome, XDG_CONFIG_HOME: xdgHome }, home),
+    customHome,
   );
   assert.equal(
-    defaultOpenCodeConfigDir({ XDG_CONFIG_HOME: "/xdg/config" }, "/home/user"),
-    "/xdg/config/opencode",
+    defaultOpenCodeConfigDir({ XDG_CONFIG_HOME: xdgHome }, home),
+    join(xdgHome, "opencode"),
   );
-  assert.equal(defaultOpenCodeConfigDir({}, "/home/user"), "/home/user/.config/opencode");
+  assert.equal(defaultOpenCodeConfigDir({}, home), join(home, ".config", "opencode"));
 });
 
 test("OpenCode CLI path discovery recognizes the staged npm package layout", async () => {
@@ -62,7 +65,7 @@ test("OpenCode plugin install materializes a managed loader, canonical skill, an
     assert.match(loader, new RegExp(escapeRegex(`"openCodeConfigDir":${JSON.stringify(fixture.openCodeConfigDir)}`)));
     assert.match(loader, new RegExp(escapeRegex(`"memoraxCodeCommand":${JSON.stringify(fixture.memoraxCodeCommand)}`)));
     assert.match(loader, new RegExp(escapeRegex(`"nodePath":${JSON.stringify(process.execPath)}`)));
-    assert.match(loader, /"cliBinDir":"\/managed\/bin"/);
+    assert.match(loader, new RegExp(escapeRegex(`"cliBinDir":${JSON.stringify(fixture.options.cliBinDir)}`)));
     const repoMemoryHelperLoader = await readFile(installed.repoMemoryHelperPath, "utf8");
     assert.match(repoMemoryHelperLoader, /^\/\/ Managed by MemoraX Code/);
     assert.match(
@@ -397,7 +400,7 @@ async function createFixture(name) {
       repoMemoryHelperSourcePath,
       skillSourcePath,
       memoraxCodeCommand,
-      cliBinDir: "/managed/bin",
+      cliBinDir: join(root, "managed-bin"),
     },
   };
 }

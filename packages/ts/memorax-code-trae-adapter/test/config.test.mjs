@@ -22,8 +22,10 @@ import {
 import { writeTraeRuntimeObservation } from "../src/runtime-observation.mjs";
 
 test("Trae home and application discovery honor explicit and platform locations", () => {
-  assert.equal(defaultTraeHome({ TRAE_CN_HOME: "/custom/trae" }, "/home/user"), "/custom/trae");
-  assert.equal(defaultTraeHome({}, "/home/user"), "/home/user/.trae-cn");
+  const home = join(tmpdir(), "trae-discovery-home");
+  const customHome = join(home, "custom-trae");
+  assert.equal(defaultTraeHome({ TRAE_CN_HOME: customHome }, home), customHome);
+  assert.equal(defaultTraeHome({}, home), join(home, ".trae-cn"));
   assert.equal(traeInstallationDetected({
     env: {},
     home: "/home/user",
@@ -146,7 +148,7 @@ test("Trae install merges managed Hooks and Skill without changing user Hooks", 
     for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
       const managed = hooks.hooks[event]
         .flatMap((group) => group.hooks ?? [])
-        .filter((hook) => hook.command?.includes("--memorax-code-trae-hook-v1"));
+        .filter((hook) => hookScript(hook.command).includes("--memorax-code-trae-hook-v1"));
       assert.equal(managed.length, 1);
     }
 
@@ -369,6 +371,7 @@ test("Trae install leaves shared artifacts unchanged when ownership intent canno
 
 test("Trae lifecycle mutations wait for the shared cross-process lock", async () => {
   const fixture = await createFixture("lifecycle-lock");
+  const originalHooks = await readFile(join(fixture.traeHome, "hooks.json"), "utf8");
   let releaseLock;
   let holder;
   let pendingInstall;
@@ -385,7 +388,7 @@ test("Trae lifecycle mutations wait for the shared cross-process lock", async ()
     pendingInstall = enableTraeAdapter(fixture.options);
     await delay(50);
     const blockedHooks = await readFile(join(fixture.traeHome, "hooks.json"), "utf8");
-    assert.equal(blockedHooks.includes("--memorax-code-trae-hook-v1"), false);
+    assert.equal(blockedHooks, originalHooks);
 
     releaseLock();
     releaseLock = undefined;
@@ -413,7 +416,9 @@ test("Trae disable and removal delete only MemoraX-managed content", async () =>
     assert.equal(disabled.ok, true);
     assert.equal(disabled.enabled, false);
     const disabledHooks = JSON.parse(await readFile(join(fixture.traeHome, "hooks.json"), "utf8"));
-    assert.equal(JSON.stringify(disabledHooks).includes("--memorax-code-trae-hook-v1"), false);
+    assert.equal(Object.values(disabledHooks.hooks).flatMap((groups) => groups)
+      .flatMap((group) => group.hooks ?? [])
+      .some((hook) => hookScript(hook.command).includes("--memorax-code-trae-hook-v1")), false);
     assert.equal(disabledHooks.hooks.UserPromptSubmit[0].hooks[0].command, "user-command");
     assert.equal(await readFile(join(installed.skillPath, "SKILL.md"), "utf8"), "# MemoraX Code\n");
 
@@ -518,4 +523,8 @@ function decodePowerShellCommand(command) {
   const encoded = / -EncodedCommand ([A-Za-z0-9+/=]+)$/.exec(command)?.[1];
   assert.ok(encoded, command);
   return Buffer.from(encoded, "base64").toString("utf16le");
+}
+
+function hookScript(command = "") {
+  return command.includes("-EncodedCommand") ? decodePowerShellCommand(command) : command;
 }

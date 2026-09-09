@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
@@ -48,6 +50,77 @@ test("client Hook generations stage immutably and activate atomically", async ()
       "utf8",
     )).includes("generation-a"), true);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("generation publication retries Windows contention without changing current authority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-hook-generation-contention-"));
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalRename = fs.renameSync;
+  const originalRemove = fs.rmSync;
+  try {
+    const packageRoot = join(root, "package");
+    const memoraxCodeHome = join(root, "home");
+    await writeRuntimePackage(packageRoot, "1.0.0", "current");
+    const current = stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome });
+    activateClientHookRuntimeGeneration({ memoraxCodeHome, generation: current });
+    const paths = clientHookRuntimePaths(memoraxCodeHome);
+    const currentRecord = await readFile(paths.currentPath, "utf8");
+    await writeRuntimePackage(packageRoot, "1.0.1", "next");
+
+    const publishError = Object.assign(new Error("generation publication denied"), { code: "EPERM" });
+    let persistent = false;
+    let renames = 0;
+    let removals = 0;
+    fs.renameSync = (source, destination) => {
+      if (basename(source).startsWith(".staging-") && (++renames === 1 || persistent)) {
+        throw publishError;
+      }
+      return originalRename(source, destination);
+    };
+    fs.rmSync = (target, ...args) => {
+      if (persistent && basename(target).startsWith(".staging-") && ++removals === 1) {
+        throw Object.assign(new Error("stage cleanup busy"), { code: "EBUSY" });
+      }
+      return originalRemove(target, ...args);
+    };
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    syncBuiltinESMExports();
+
+    const next = stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome });
+    assert.equal(next.reused, false);
+    assert.equal(renames, 2);
+    assert.equal(stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome }).reused, true);
+    assert.equal(renames, 2, "an existing generation must be verified and reused");
+    assert.equal(await readFile(paths.currentPath, "utf8"), currentRecord);
+
+    await writeRuntimePackage(packageRoot, "1.0.2", "blocked");
+    persistent = true;
+    assert.throws(() => stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome }),
+      (error) => error === publishError);
+    assert.equal(renames, 7, "persistent contention must stop after five publication attempts");
+    assert.equal(removals, 2, "a temporary cleanup failure must also be retried");
+    assert.deepEqual(fs.readdirSync(paths.generationsRoot).sort(),
+      [current.generationId, next.generationId].sort());
+    assert.equal(await readFile(paths.currentPath, "utf8"), currentRecord);
+    assert.equal(readCurrentClientHookRuntime(memoraxCodeHome).status, "valid");
+
+    publishError.code = "EIO";
+    fs.rmSync = (target, ...args) => {
+      if (basename(target).startsWith(".staging-")) throw new Error("stage cleanup failed");
+      return originalRemove(target, ...args);
+    };
+    syncBuiltinESMExports();
+    assert.throws(() => stageClientHookRuntimeGeneration({ packageRoot, memoraxCodeHome }),
+      (error) => error === publishError);
+    assert.equal(renames, 8, "non-retryable errors must fail immediately");
+    assert.equal(await readFile(paths.currentPath, "utf8"), currentRecord);
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    fs.renameSync = originalRename;
+    fs.rmSync = originalRemove;
+    syncBuiltinESMExports();
     await rm(root, { recursive: true, force: true });
   }
 });

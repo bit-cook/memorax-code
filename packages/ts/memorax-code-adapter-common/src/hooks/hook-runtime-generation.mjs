@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withJsonFileLock } from "../config-utils.mjs";
+import { withWindowsDirectoryRetry } from "../windows-directory-retry.mjs";
 import {
   ensurePrivateDirectory,
   readJsonRuntimeRecord,
@@ -121,11 +122,15 @@ export function stageClientHookRuntimeGeneration({
         durableBoundary: paths.home,
       });
       syncRegularTree(temporaryPath, { syncFile, syncDirectory: syncDir });
-      renameSync(temporaryPath, generationPath);
+      withWindowsDirectoryRetry(() => renameSync(temporaryPath, generationPath));
       syncDir(paths.generationsRoot);
       return { ...record, generationPath, reused: false };
     } catch (error) {
-      rmSync(temporaryPath, { recursive: true, force: true });
+      try {
+        withWindowsDirectoryRetry(() => rmSync(temporaryPath, { recursive: true, force: true }));
+      } catch {
+        // Preserve the publication failure if Windows also blocks stage cleanup.
+      }
       if (existsSync(generationPath)) {
         const existing = readGenerationRecord(generationPath);
         assertSameGeneration(existing, record);
