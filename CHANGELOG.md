@@ -6,6 +6,39 @@ behavior.
 
 ## Unreleased
 
+## [0.1.16] - 2026-09-10
+
+### Added
+
+- Added independent support for CodeBuddy CLI and WorkBuddy, including
+  discovery, plugin installation, Hooks, and lifecycle operations. Either can
+  be used alone, or both can be enabled with separate configuration roots.
+  Stopping or uninstalling one preserves the other.
+
+### Fixed
+
+- Recognized the official Windows CodeBuddy npm `.cmd` launcher during setup
+  and reported unusable selected runtimes instead of silently skipping them.
+- Migrated identifiable legacy WorkBuddy installations to the separate
+  WorkBuddy client while preserving explicit selections and owned custom
+  roots. Hooks with missing or invalid client identity no longer default to
+  CodeBuddy, and Windows-equivalent root paths are cleaned up consistently.
+- Retried transient Windows directory failures during Trae/OpenCode
+  installation and shared Hook runtime publication, with bounded retries and
+  explicit failure when access remains unavailable.
+- Reported the failing client and installation step accurately during setup,
+  without adding another global stop/start cycle after the Backend has
+  recovered while a client integration remains incomplete.
+- Coordinated concurrent Hook recovery and preserved the managed client set,
+  including explicit client stops, when restoring an unavailable Backend.
+
+### Upgrade note
+
+Finish the current reply before updating, then start a new CodeBuddy CLI
+session or restart WorkBuddy to load the new Hooks. Legacy installations whose
+client ownership is ambiguous require an explicit WorkBuddy home; see the
+[configuration guide](docs/configuration.md#codebuddy-and-workbuddy-integration-paths).
+
 ## [0.1.15] - 2026-09-09
 
 ### Added
