@@ -19,6 +19,7 @@ const codexAdapterSourceRoot = fileURLToPath(new URL(
 ));
 const clientHookRuntimePath = fileURLToPath(new URL("../lib/client-hook-runtime.mjs", import.meta.url));
 const setupReconcilePath = fileURLToPath(new URL("../lib/setup-reconcile.mjs", import.meta.url));
+const setupApiKeyInputPath = fileURLToPath(new URL("../lib/setup-api-key-input.mjs", import.meta.url));
 const codexRuntimeShellPath = fileURLToPath(new URL(
   "../../../ts/memorax-code-codex-adapter/hooks/runtime-shell.json",
   import.meta.url,
@@ -140,7 +141,7 @@ async function startMockMemorax({ status = 200, body = { success: true, data: { 
   };
 }
 
-async function runSetup({ existingCache = false, explicitCache = false, codexRegistered, hookRuntimeFailure, failStartOnce = false, adapterStartFailure = false, connectionAuthorityFailure = false, runtimeAuthorityFailureCode, officialMode = false, codexConfig, memoraxCodeConfig, memoraxCodeConfigMode, emptyClaudeSettings = false, claudeAvailable = true, claudeVersionFails = false, claudeSettingsText, codexAvailable = true, codexAppOnly = false, vscodeOnly = false, dshProfiles = [], opencodeAvailable = false, opencodeXdgAvailable = false, opencodeCliAvailable = false, codebuddyAvailable = false, codebuddyNativeConfig = false, workbuddyAvailable = false, legacyWorkBuddyInstallation = false, failingBuddyVersion, missingBuddyStatus, traeAvailable = false, skipCodexPluginInstall = false, skipClaudeAdapterInstall = false, skipOpenCodeAdapterInstall = false, skipCodeBuddyAdapterInstall = false, skipWorkBuddyAdapterInstall = false, skipTraeAdapterInstall = false, unavailableStatus = false, prefixedStatus = false, input = "", interactive = true, npmCommand = "install", updateMode = false, setupMode = "automatic", memoraxVerify, memoraxEnv = {}, memoryStatusFixture, trialProvisionFailure = false, hookSnapshot = [], hookUpdatePlan = [], hookFullReview = false, hookFullReviewMissing = false, hookSnapshotFails = false, hookCheckFails = false, hookTrustFails = false, detectedUserId = "memory-user", detectedLanguage = "zh", ttyOverride } = {}) {
+async function runSetup({ existingCache = false, explicitCache = false, codexRegistered, hookRuntimeFailure, failStartOnce = false, adapterStartFailure = false, connectionAuthorityFailure = false, runtimeAuthorityFailureCode, officialMode = false, codexConfig, memoraxCodeConfig, memoraxCodeConfigMode, emptyClaudeSettings = false, claudeAvailable = true, claudeVersionFails = false, claudeSettingsText, codexAvailable = true, codexAppOnly = false, vscodeOnly = false, dshProfiles = [], opencodeAvailable = false, opencodeXdgAvailable = false, opencodeCliAvailable = false, codebuddyAvailable = false, codebuddyNativeConfig = false, workbuddyAvailable = false, legacyWorkBuddyInstallation = false, failingBuddyVersion, missingBuddyStatus, traeAvailable = false, skipCodexPluginInstall = false, skipClaudeAdapterInstall = false, skipOpenCodeAdapterInstall = false, skipCodeBuddyAdapterInstall = false, skipWorkBuddyAdapterInstall = false, skipTraeAdapterInstall = false, unavailableStatus = false, prefixedStatus = false, input = "", nativeSetupArgs = [], interactive = true, npmCommand = "install", updateMode = false, setupMode = "automatic", memoraxVerify, memoraxEnv = {}, memoryStatusFixture, tamperApiKeyAfterStart = false, trialProvisionFailure = false, hookSnapshot = [], hookUpdatePlan = [], hookFullReview = false, hookFullReviewMissing = false, hookSnapshotFails = false, hookCheckFails = false, hookTrustFails = false, detectedUserId = "memory-user", detectedLanguage = "zh", ttyOverride } = {}) {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-setup-"));
   const binDir = join(root, "bin");
   const codexHome = join(root, "codex-home");
@@ -221,6 +222,7 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
   }
   await copyFile(clientHookRuntimePath, join(libDir, "client-hook-runtime.mjs"));
   await copyFile(setupReconcilePath, join(libDir, "setup-reconcile.mjs"));
+  await copyFile(setupApiKeyInputPath, join(libDir, "setup-api-key-input.mjs"));
   await writeFile(join(libDir, "setup-memory-preferences.mjs"), [
     "export function detectSetupMemoryPreferences() {",
     `  return Object.freeze(${JSON.stringify({
@@ -322,9 +324,13 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
   await symlink(smolTomlPath, join(nodeModulesDir, "smol-toml"), "dir");
   await writeFile(join(binDir, "memorax-code.mjs"), [
     "#!/usr/bin/env node",
-    "import { appendFileSync, existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';",
+    "import { appendFileSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';",
     "import { join } from 'node:path';",
     `appendFileSync(${JSON.stringify(logPath)}, 'memorax-code ' + process.argv.slice(2).join(' ') + '\\n');`,
+    `if (${JSON.stringify(tamperApiKeyAfterStart)} && process.argv[2] === 'start') {`,
+    "  const path = join(process.env.MEMORAX_CODE_HOME, 'config.toml');",
+    "  writeFileSync(path, readFileSync(path, 'utf8').replace(/^api_key =.*$/m, 'api_key = \"replaced-fixture-key\"'));",
+    "}",
     `if (process.env.MEMORAX_CODE_DSH_ADAPTER_OPTIONAL === '1') appendFileSync(${JSON.stringify(logPath)}, 'dsh-adapter-optional ' + process.argv[2] + '\\n');`,
     `if (process.argv[2] === 'codex-plugin') appendFileSync(${JSON.stringify(logPath)}, 'codex-runtime ' + (process.env.CODEX_CLI_PATH ?? '') + '\\n');`,
     "if (process.argv[2] === '--version') { console.log('memorax-code 0.1.1-test'); process.exit(0); }",
@@ -709,7 +715,7 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     childEnv.MEMORAX_CODE_CODEX_COMMAND = join(root, "missing-codex");
   }
   const result = await new Promise((resolve) => {
-    const child = spawn(process.execPath, [setupEntrypoint], {
+    const child = spawn(process.execPath, [setupEntrypoint, ...nativeSetupArgs], {
       env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -1232,6 +1238,73 @@ test("setup configures an existing MemoraX account without trial provisioning", 
     await assertSetupComplete(run);
   } finally {
     await rm(run.root, { recursive: true, force: true });
+  }
+});
+
+test("setup accepts API key stdin without a TTY and preserves independent client choices", async () => {
+  const apiKey = `sk_${"W".repeat(43)}`;
+  const run = await runSetup({
+    interactive: false,
+    nativeSetupArgs: ["--non-interactive"],
+    setupMode: "existing-account",
+    input: `${apiKey}\r\n`,
+    codexAvailable: false,
+    claudeAvailable: false,
+    codebuddyAvailable: true,
+    workbuddyAvailable: true,
+    detectedUserId: "workbuddy-user",
+    detectedLanguage: null,
+    trialProvisionFailure: true,
+    memoraxCodeConfig: "[clients]\ncodex = false\nclaude = false\ncodebuddy = false\n\n[memory.writeback]\nenabled = false\n",
+  });
+  try {
+    assert.equal(run.result.code, 0, run.result.stderr);
+    const output = `${run.result.stdout}\n${run.result.stderr}`;
+    assert.match(output, /API Key match: true/);
+    assert.equal(output.includes(apiKey), false);
+    assert.equal(run.log.includes(apiKey), false);
+    assert.doesNotMatch(run.log, /^trial-provision$/m);
+    assert.match(run.log, /^memorax-code start --clients dsh,workbuddy --json$/m);
+    const config = await readFile(join(run.memoraxCodeHome, "config.toml"), "utf8");
+    assert.ok(config.includes(`api_key = "${apiKey}"`));
+    assert.match(config, /user_id = "workbuddy-user"/);
+    assert.match(config, /output_language = "zh"/);
+    assert.match(tomlSectionText(config, "clients"), /^codebuddy = false$/m);
+    assert.match(tomlSectionText(config, "clients"), /^workbuddy = true$/m);
+    assert.match(tomlSectionText(config, "memory.writeback"), /^enabled = false$/m);
+    await assertSetupComplete(run);
+  } finally {
+    await rm(run.root, { recursive: true, force: true });
+  }
+});
+
+test("API key stdin setup cannot complete with a missing username or a replaced saved key", async (t) => {
+  const apiKey = `sk_${"F".repeat(43)}`;
+  for (const scenario of [
+    { name: "missing default username", options: { detectedUserId: null }, started: false },
+    { name: "saved key changed after start", options: { tamperApiKeyAfterStart: true }, started: true },
+  ]) {
+    await t.test(scenario.name, async () => {
+      const run = await runSetup({
+        interactive: false,
+        nativeSetupArgs: ["--non-interactive"],
+        setupMode: "existing-account",
+        input: apiKey,
+        ...scenario.options,
+      });
+      try {
+        assert.equal(run.result.code, 1, run.result.stderr);
+        const output = `${run.result.stdout}\n${run.result.stderr}`;
+        assert.doesNotMatch(output, /Setup completed successfully|API Key match: true/);
+        assert.equal(output.includes(apiKey), false);
+        assert.equal(run.log.includes(apiKey), false);
+        assert.doesNotMatch(run.log, /^trial-provision$/m);
+        assert.equal(/^memorax-code start /m.test(run.log), scenario.started);
+        await assertSetupIncomplete(run);
+      } finally {
+        await rm(run.root, { recursive: true, force: true });
+      }
+    });
   }
 });
 

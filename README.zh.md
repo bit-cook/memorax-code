@@ -55,7 +55,7 @@ CodeBuddy CLI、WorkBuddy、DeepSeek Harness、OpenCode 或 Trae 中的至少一
 请先安装或初始化 DSH，创建至少一个 Profile，并确保 `pnpm` 在 `PATH` 中可用。
 MemoraX Code 不会安装或更新 DSH。
 
-Linux 下，setup 管理凭据需要 libsecret 提供的 `/usr/bin/secret-tool`，以及当前用户会话中可用的
+Linux 下，游客凭据管理需要 libsecret 提供的 `/usr/bin/secret-tool`，以及当前用户会话中可用的
 Secret Service。使用 Remote SSH、WSL 或 Dev Container 时，请将 MemoraX Code 安装在
 Coding Agent 所在的同一环境中。MemoraX 搜索和写回需要网络访问。
 
@@ -79,6 +79,23 @@ memorax-code setup --existing-account
 ```
 
 按照安装引导，在本机终端中输入 MemoraX 用户名和 API Key。
+
+如果 Coding Agent 无法提供交互式终端，可以通过 stdin 传入 API Key。以下示例假定调用方
+已提供 `MEMORAX_SETUP_API_KEY` 变量；请勿将 Key 填入命令参数或项目文件。
+
+```bash
+printf '%s\n' "$MEMORAX_SETUP_API_KEY" | memorax-code setup --existing-account --non-interactive
+```
+
+Windows PowerShell 使用：
+
+```powershell
+$env:MEMORAX_SETUP_API_KEY | memorax-code.cmd setup --existing-account --non-interactive
+```
+
+该显式命令会替换已保存的 Key，使用检测到的本机用户名和系统语言。
+本地配置与就绪检查通过后会输出 `API Key match: true`，不代表云端凭据已验证。
+输入要求及配置复用行为见[非交互安装说明](docs/configuration.md#existing-account-setup-without-a-terminal)。
 
 > [!TIP]
 > 跨设备使用时，可在一台已配置设备的配置文件（默认位于 `~/.memorax-code/config.toml`）中
@@ -139,7 +156,7 @@ Windows PowerShell 请使用 `memorax-cli.cmd status`。客户端真正执行 Ho
 
 ### 安装故障排查
 
-npm 包安装完成后不会自动启动 setup，请在交互式终端中运行上面适合您的安装引导命令。
+npm 包安装完成后不会自动启动 setup，请运行上面适合您的安装引导命令；Agent 没有交互式终端时可使用 stdin 模式。
 如果 setup 未完成或记忆不可用，请先运行状态检查命令，再按[故障排查](docs/troubleshooting.md)处理。
 
 #### Windows：找不到 `memorax-code` 或 `memorax-cli`

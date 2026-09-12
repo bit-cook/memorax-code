@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
@@ -250,7 +251,7 @@ test("root help documents setup and update", async () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.error, undefined);
     assert.match(result.stdout, /^Usage: memorax-code \[command\] \[options\]/);
-    assert.match(result.stdout, /^  setup\s+Run or repair the interactive setup$/m);
+    assert.match(result.stdout, /^  setup\s+Run or repair setup$/m);
     assert.match(result.stdout, /^  account\s+Manage local MemoraX account information$/m);
     assert.match(result.stdout, /^  update\s+Update the globally installed npm package$/m);
     assert.doesNotMatch(result.stdout, /repo-memory|user-profile/);
@@ -309,16 +310,17 @@ test("account command reveals only the requested local trial Mark ID", async () 
   }
 });
 
-test("setup help describes automatic, existing-account, and reconfigure modes", async () => {
+test("setup help describes interactive and non-interactive existing-account modes", async () => {
   const fixture = await createPackageFixture();
   try {
     const result = runCli(fixture, ["setup", "--help"]);
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.error, undefined);
-    assert.match(result.stdout, /^Usage: memorax-code setup \[--existing-account \| --reconfigure\] \[--home DIR\]/);
-    assert.match(result.stdout, /A complete existing\nconfiguration is reused automatically/);
+    assert.match(result.stdout, /^Usage: memorax-code setup \[--existing-account \| --reconfigure\] \[--non-interactive\] \[--home DIR\]/);
+    assert.match(result.stdout, /Plain setup reuses a complete configuration/);
     assert.match(result.stdout, /^  --existing-account\s+Configure an existing account instead of anonymous access$/m);
+    assert.match(result.stdout, /^  --non-interactive\s+With --existing-account, read the API Key from stdin and use defaults without prompting$/m);
     assert.match(result.stdout, /^  --reconfigure\s+Re-detect memory preferences instead of reusing configuration$/m);
     assert.equal(await pathExists(fixture.setupLogPath), false);
     assert.equal(await pathExists(fixture.backendLogPath), false);
@@ -365,6 +367,68 @@ test("setup rejects conflicting setup modes before starting setup", async () => 
   }
 });
 
+test("setup forwards an existing-account API key through private stdin without a TTY", async () => {
+  const fixture = await createPackageFixture();
+  const apiKey = `sk_${"P".repeat(43)}`;
+  try {
+    const result = await runCli(fixture, ["setup", "--existing-account", "--non-interactive"], {
+      inputChunks: [apiKey.slice(0, 9), apiKey.slice(9), "\r\n"],
+      timeout: 10_000,
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.error, undefined);
+    assert.deepEqual(await readJsonLines(fixture.setupLogPath), [{
+      args: ["--non-interactive"],
+      home: fixture.memoraxCodeHome,
+      setupMode: "existing-account",
+      stdinKeyHash: createHash("sha256").update(apiKey).digest("hex"),
+      keyInEnvironment: false,
+      stdinIsTTY: false,
+    }]);
+    assert.equal(`${result.stdout}\n${result.stderr}`.includes(apiKey), false);
+    assert.equal((await readFile(fixture.setupLogPath, "utf8")).includes(apiKey), false);
+    assert.equal(await pathExists(fixture.backendLogPath), false);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("setup rejects invalid API key stdin before starting setup without exposing input", async (t) => {
+  const apiKey = `sk_${"I".repeat(43)}`;
+  for (const scenario of [
+    { name: "missing existing-account mode", args: ["--non-interactive"], input: apiKey },
+    { name: "reconfigure mode", args: ["--reconfigure", "--non-interactive"], input: apiKey },
+    { name: "key accidentally passed as an argument", args: ["--existing-account", "--non-interactive", apiKey], input: apiKey },
+    { name: "empty input", input: "" },
+    { name: "multiple lines", input: `${apiKey}\nsecond-line` },
+    { name: "NUL", input: `${apiKey}\0` },
+    { name: "oversized input", input: `${apiKey}${"x".repeat(16 * 1024)}` },
+    { name: "TTY input", input: apiKey, stdinIsTTY: true },
+  ]) {
+    await t.test(scenario.name, async () => {
+      const fixture = await createPackageFixture();
+      try {
+        const result = runCli(fixture, ["setup", ...(scenario.args ?? ["--existing-account", "--non-interactive"])], {
+          input: scenario.input,
+          stdinIsTTY: scenario.stdinIsTTY,
+        });
+
+        assert.equal(result.error, undefined);
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /API key|non-interactive|setup option/i);
+        assert.equal(`${result.stdout}\n${result.stderr}`.includes(apiKey), false);
+        assert.equal(await pathExists(fixture.setupLogPath), false);
+        assert.equal(await pathExists(fixture.backendLogPath), false);
+        assert.equal(await pathExists(join(fixture.memoraxCodeHome, "config.toml")), false);
+        assert.equal(await pathExists(join(fixture.memoraxCodeHome, setupCompletionRelativePath)), false);
+      } finally {
+        await fixture.cleanup();
+      }
+    });
+  }
+});
+
 test("unknown commands are still delegated to the Backend entrypoint", async () => {
   const fixture = await createPackageFixture();
   try {
@@ -395,6 +459,7 @@ async function createPackageFixture() {
     "lib/resolve-codex-command.mjs",
     "lib/resolve-codebuddy-command.mjs",
     "lib/run-entrypoint.mjs",
+    "lib/setup-api-key-input.mjs",
     "lib/vscode-extension-command.mjs",
     "lib/windows-cli-invocation.mjs",
     "lib/windows-user-path.mjs",
@@ -457,12 +522,19 @@ async function createPackageFixture() {
     "",
   ].join("\n"));
   await writeFile(join(root, "bin", "memorax-code-setup.mjs"), [
-    "import { appendFileSync } from 'node:fs';",
+    "import { appendFileSync, readFileSync } from 'node:fs';",
+    "import { createHash } from 'node:crypto';",
+    "const stdinKey = process.argv.includes('--non-interactive') ? readFileSync(0, 'utf8').replace(/\\r?\\n$/, '') : undefined;",
     "appendFileSync(process.env.MEMORAX_CODE_TEST_SETUP_LOG, JSON.stringify({",
     "  args: process.argv.slice(2),",
     "  home: process.env.MEMORAX_CODE_HOME,",
     "  setupMode: process.env.MEMORAX_CODE_SETUP_MODE ?? 'automatic',",
     "  ...(process.env.MEMORAX_CODE_SETUP_UPDATE === undefined ? {} : { updateMode: process.env.MEMORAX_CODE_SETUP_UPDATE }),",
+    "  ...(stdinKey === undefined ? {} : {",
+    "    stdinKeyHash: createHash('sha256').update(stdinKey).digest('hex'),",
+    "    keyInEnvironment: Object.values(process.env).some((value) => value.includes(stdinKey)),",
+    "    stdinIsTTY: process.stdin.isTTY === true,",
+    "  }),",
     "}) + '\\n');",
     "process.exit(Number(process.env.MEMORAX_CODE_TEST_SETUP_EXIT_CODE ?? 0));",
     "",
@@ -498,6 +570,8 @@ function runCli(fixture, args = [], {
   backendExitCode = 0,
   extraEnv = {},
   setupExitCode = 0,
+  input,
+  inputChunks,
   stdinIsTTY = false,
   timeout = 5_000,
 } = {}) {
@@ -522,16 +596,38 @@ function runCli(fixture, args = [], {
   Object.assign(env, extraEnv);
   if (assumeInteractive) env.MEMORAX_CODE_SETUP_ASSUME_INTERACTIVE = "1";
   else delete env.MEMORAX_CODE_SETUP_ASSUME_INTERACTIVE;
-  return spawnSync(
-    process.execPath,
-    [stdinIsTTY ? join(fixture.root, "entrypoint-tty.mjs") : join(fixture.root, "bin", "memorax-code.mjs"), ...args],
-    {
-      encoding: "utf8",
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout,
-    },
-  );
+  const cliArgs = [stdinIsTTY ? join(fixture.root, "entrypoint-tty.mjs") : join(fixture.root, "bin", "memorax-code.mjs"), ...args];
+  const options = {
+    env,
+    stdio: [input === undefined && !inputChunks ? "ignore" : "pipe", "pipe", "pipe"],
+    timeout,
+  };
+  if (inputChunks) {
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, cliArgs, options);
+      let stdout = "";
+      let stderr = "";
+      let error;
+      let timer;
+      child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+      child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+      child.on("error", (value) => { error = value; });
+      child.stdin.on("error", () => {});
+      child.on("close", (status) => {
+        clearTimeout(timer);
+        resolve({ status, error, stdout, stderr });
+      });
+      const writeChunk = (index) => {
+        if (index === inputChunks.length) child.stdin.end();
+        else {
+          child.stdin.write(inputChunks[index]);
+          timer = setTimeout(() => writeChunk(index + 1), 40);
+        }
+      };
+      timer = setTimeout(() => writeChunk(0), 300);
+    });
+  }
+  return spawnSync(process.execPath, cliArgs, { ...options, encoding: "utf8", input });
 }
 
 function validSetupRecord() {

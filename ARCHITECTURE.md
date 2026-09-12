@@ -240,7 +240,7 @@ sequenceDiagram
     Setup->>Transition: consume only after successful status
   end
 
-  User->>Setup: interactive setup
+  User->>Setup: interactive setup or explicit existing-account stdin setup
   Setup->>Generation: stage immutable Hook runtime
   Setup->>Setup: resolve client selection and connection
   opt Codex selected and detected
@@ -290,8 +290,11 @@ future timestamps, and consume state only after successful start and status.
 
 Public `memorax-code setup` owns disclosure, preferences, credential
 provisioning or entry, client discovery, initial Hook activation, and Backend
-reconciliation. It requires an interactive terminal and commits the versioned
-completion record only after final verification. Invalid or unsupported
+reconciliation. It accepts either interactive input or an explicit
+`--existing-account --non-interactive` request with a raw key on stdin. The latter
+uses detected preferences, preserves explicit client choices, and verifies the
+saved key locally without returning it. Both commit the versioned completion
+record only after final verification. Invalid or unsupported
 completion and transition records fail closed. No-argument routing and legacy
 migration follow the [setup state rules](docs/configuration.md#setup-automatic-update-and-package-transition-state).
 

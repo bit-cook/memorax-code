@@ -144,6 +144,14 @@ metadata remain only in secure credential storage. Device-mark metadata is not
 written to the user configuration file; it is read only for explicit account
 inspection and matching anonymous quota reminders.
 
+Explicit existing-account setup can accept a raw API key through stdin with
+`--non-interactive`, without an interactive terminal. It writes the key to private
+configuration and verifies the saved value without placing it in its command
+arguments or output. The invoking shell or coding agent remains responsible
+for how it obtains and retains that input; stdin does not prevent upstream
+command-history or conversation logging. A local key match and setup completion
+do not establish remote authentication.
+
 Quota-reminder deduplication is stored separately in a private local runtime
 record containing a one-way connection fingerprint and reminder levels, never
 a raw API key or Mark ID. An anonymous quota reminder reads the ready secure

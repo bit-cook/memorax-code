@@ -96,14 +96,47 @@ default of yes; declining records `false`. An absent client that is not
 detected remains absent, while a selected client that is temporarily
 unavailable remains selected. Direct npm installation does not detect clients
 or modify `[clients]`.
-Automatic update reconciliation preserves explicit choices and silently
-enables a detected client whose field is absent. This lets configurations
-written before an adapter was supported adopt it when its runtime is already
+Non-interactive existing-account setup and automatic update reconciliation
+preserve explicit choices and silently enable a detected client whose field is
+absent. This lets configurations written before an adapter was supported
+adopt it when its runtime is already
 installed, without overriding an explicit `false`.
 
 Client selection controls managed client-integration lifecycle only. It does
 not change any coding agent's provider settings.
 `--clients none` runs the Backend without managing a client integration.
+
+## Existing-account setup without a terminal
+
+`memorax-code setup --existing-account --non-interactive` is the public
+non-interactive account setup entrypoint. It reads one raw API key from stdin
+until EOF, with a 16 KiB input limit; surrounding whitespace is trimmed.
+The value must be non-empty and contain no embedded line breaks or NUL bytes.
+The key comes from stdin, not a command-line argument or environment fallback.
+A conflicting `MEMORAX_CODE_MEMORAX_API_KEY` override is rejected. The caller
+must close stdin; do not send JSON or the interactive setup answers. The flag
+is valid only with `--existing-account`, not guest setup or update reconciliation.
+
+The command replaces the saved connection key and uses the detected
+operating-system username and system language defaults (`zh` or `en`). If a
+safe username cannot be detected, it fails and directs the user to interactive
+setup. To reuse an already complete connection, the caller should retain it
+instead of invoking this explicit replacement command. Existing explicit
+client choices, including `false`, are preserved; newly detected clients with
+no recorded choice are enabled.
+
+The command uses the same private configuration writes, Hook activation,
+Backend reconciliation, and setup-completion authority as interactive setup.
+Before recording completion, it checks that the saved key matches stdin and
+that local configuration and selected integrations are ready. A successful
+run prints `API Key match: true` without printing the key. This is a local
+persistence check; only a real MemoraX operation verifies remote authentication.
+
+For shell examples, see the package README.
+On Windows PowerShell, use `memorax-code.cmd` without changing execution policy.
+The caller owns secure input handling: MemoraX Code does not put the stdin key
+in its command-line arguments or output, but cannot prevent a shell or coding
+agent from retaining the command or conversation that supplied it.
 
 ## Setup, automatic update, and package-transition state
 
@@ -122,6 +155,9 @@ restores an account-free credential and writes its API key to `config.toml`.
 `memorax-code setup --existing-account` bypasses automatic reuse and accepts
 an existing connection's username and API key. `--reconfigure` bypasses reuse
 and follows the account-free path again.
+
+The explicit `--existing-account --non-interactive` mode also works without a
+terminal; see [its input and configuration rules](#existing-account-setup-without-a-terminal).
 
 Successful setup writes a private versioned record at:
 

@@ -38,6 +38,7 @@ import {
   startLifecycleReport,
 } from "../lib/setup-reconcile.mjs";
 import { detectSetupMemoryPreferences } from "../lib/setup-memory-preferences.mjs";
+import { readSetupApiKey } from "../lib/setup-api-key-input.mjs";
 import { ensureTrialSetupCredential } from "../lib/trial-setup.mjs";
 import { commandOnPath } from "../lib/vscode-extension-command.mjs";
 import { resolveWindowsCliInvocation } from "../lib/windows-cli-invocation.mjs";
@@ -66,6 +67,7 @@ const skipTraeAdapterInstall = truthyEnv(process.env.MEMORAX_CODE_SKIP_TRAE_ADAP
 const updateMode = truthyEnv(process.env.MEMORAX_CODE_SETUP_UPDATE);
 const automaticUpdateMode = truthyEnv(process.env.MEMORAX_CODE_SETUP_AUTOMATIC_UPDATE);
 const setupMode = setupModeFromEnvironment(process.env.MEMORAX_CODE_SETUP_MODE);
+const nonInteractive = process.argv.includes("--non-interactive");
 if (!setupMode) {
   logRed("Setup mode is invalid.");
   process.exit(1);
@@ -73,6 +75,19 @@ if (!setupMode) {
 if (automaticUpdateMode && !updateMode) {
   logRed("Automatic update setup requires update mode.");
   process.exit(1);
+}
+let stdinApiKey;
+if (nonInteractive) {
+  if (setupMode !== "existing-account" || updateMode) {
+    logRed("--non-interactive requires existing-account setup, not update reconciliation.");
+    process.exit(1);
+  }
+  try {
+    stdinApiKey = await readSetupApiKey();
+  } catch (error) {
+    logRed(error.message);
+    process.exit(1);
+  }
 }
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -107,12 +122,12 @@ if (automaticUpdateMode && !existingSetup) {
   logRed("Automatic update setup requires an existing [clients] selection.");
   process.exit(1);
 }
-if (!automaticUpdateMode && !canPromptOnStderr()) {
+if (!automaticUpdateMode && !nonInteractive && !canPromptOnStderr()) {
   logRed("Setup requires an interactive terminal.");
   log("Run `memorax-code setup` from a terminal, or use `memorax-code status` to inspect an existing setup.");
   process.exit(1);
 }
-const scriptedAnswers = !automaticUpdateMode && process.stdin.isTTY !== true
+const scriptedAnswers = !automaticUpdateMode && !nonInteractive && process.stdin.isTTY !== true
   ? parseScriptedAnswers(readFileSync(0, "utf8"))
   : undefined;
 if (seedMissingMemoraxCodeConfig() === "failed") {
@@ -187,13 +202,14 @@ const detectedClients = requestedClients.filter((client) => {
 const newlyDetectedClients = existingSetup
   ? detectedClients.filter((client) => !explicitClientChoices.includes(client))
   : [];
-const selectedClients = automaticUpdateMode
-  ? requestedClients.filter((client) => (
-      previousClients.includes(client) || newlyDetectedClients.includes(client)
-    ))
-  : existingSetup
-    ? await chooseUpdateClients(previousClients, newlyDetectedClients, scriptedAnswers)
-    : detectedClients;
+// Non-interactive setup accepts the same default choices as interactive setup.
+const selectedClients = !existingSetup
+  ? detectedClients
+  : automaticUpdateMode || nonInteractive
+    ? requestedClients.filter((client) => (
+        previousClients.includes(client) || newlyDetectedClients.includes(client)
+      ))
+    : await chooseUpdateClients(previousClients, newlyDetectedClients, scriptedAnswers);
 const clientsWithPersistedIntent = existingSetup
   ? requestedClients.filter((client) => (
       explicitClientChoices.includes(client) || newlyDetectedClients.includes(client)
@@ -248,6 +264,7 @@ if (!updateMode) {
   } else {
     memoraxConfigResult = await maybeConfigureMemoraxMemory(scriptedAnswers, {
       existingAccount: setupMode === "existing-account",
+      apiKey: stdinApiKey,
     });
   }
 }
@@ -394,6 +411,17 @@ if (!updateMode && readMemoraxInstallStatus()?.configured !== true) {
   logRed("Setup could not verify a ready MemoraX connection after Backend reconciliation.");
   process.exit(1);
 }
+if (nonInteractive) {
+  // Verify the persisted value before publishing completion, without exposing it.
+  let matches = false;
+  try {
+    matches = parse(readFileSync(memoraxCodeConfigPath(), "utf8"))?.memorax?.api_key === stdinApiKey;
+  } catch {
+    // Missing or malformed configuration must not become a successful setup.
+  }
+  log(`API Key match: ${matches}`);
+  if (!matches) process.exit(1);
+}
 try {
   const completion = writeSetupCompletionRecord({
     memoraxCodeHome: memoraxCodeHome(),
@@ -413,9 +441,24 @@ process.exit(0);
 async function maybeConfigureMemoraxMemory(scriptedAnswers, {
   existingAccount = false,
   showDisclosure = true,
+  apiKey,
 } = {}) {
   if (showDisclosure) printMemoraxDisclosure();
   const detectedPreferences = detectSetupMemoryPreferences();
+  if (apiKey !== undefined) {
+    if (!detectedPreferences.userId) {
+      logRed("Username could not be detected; run interactive setup to provide it.");
+      return "failed";
+    }
+    printDetectedMemoryPreferences(detectedPreferences);
+    return await writeMemoraxConfigFromInput({
+      userId: detectedPreferences.userId,
+      endpoint: memoraxInstallEndpoint(),
+      outputLanguage: detectedPreferences.outputLanguage ?? MEMORAX_DEFAULT_MEMORY_OUTPUT_LANGUAGE,
+      existingAccount: true,
+      apiKey,
+    });
+  }
   if (scriptedAnswers) {
     return await configureMemoraxMemoryFromAnswers(scriptedAnswers, detectedPreferences, {
       existingAccount,

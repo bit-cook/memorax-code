@@ -53,9 +53,22 @@ default setup reuses it automatically. Use `memorax-code setup --reconfigure`
 to replace it, or `memorax-code setup --existing-account` to enter an
 existing MemoraX connection.
 
-Setup requires terminal input and terminal-visible stderr. A pipe, background
-process, or redirected stdin/stderr cannot complete setup; rerun it in a normal
-interactive terminal.
+Interactive setup requires terminal input and terminal-visible stderr. If a
+coding agent reports `an interactive terminal is required`, use the explicit
+non-interactive existing-account mode instead of emulating a terminal with winpty or
+Python. For example, in Windows PowerShell, with a key already supplied in
+`MEMORAX_SETUP_API_KEY`:
+
+```powershell
+$env:MEMORAX_SETUP_API_KEY | memorax-code.cmd setup --existing-account --non-interactive
+```
+
+Close stdin after one raw key; do not pipe a sequence of interactive answers.
+This mode uses the detected username and language and replaces the saved key.
+If username detection fails, complete setup in a normal interactive terminal.
+See [non-interactive setup rules](configuration.md#existing-account-setup-without-a-terminal).
+Guest setup still requires an interactive terminal. Do not change PowerShell
+execution policy to run the `.ps1` shim; use `.cmd`.
 
 ## Windows: `memorax-code` or `memorax-cli` is not found
 
@@ -65,7 +78,7 @@ coding agent was started before installation, commands may be unavailable even
 though the package is installed. The same package installs both `memorax-code`
 and `memorax-cli`; do not install a separate CLI package.
 
-Interactive setup verifies npm's global command directory and adds it to the
+Setup verifies npm's global command directory and adds it to the
 current setup process and the Windows user `PATH` when needed. If the current
 shell cannot find `memorax-code`, use npm's actual global prefix to bootstrap
 setup and verify the CLI in PowerShell:
@@ -111,9 +124,12 @@ not required.
 Setup writes
 `$MEMORAX_CODE_HOME/runtime/setup/setup-completion.json` only after
 configuration, client and Hook reconciliation, Backend start, and final
-readiness checks succeed. If setup has not completed, rerun
-`memorax-code setup` in an interactive terminal and resolve the reported
-failure. For older installations with a complete configuration, the
+readiness checks succeed. A default `config.toml` alone is not proof of
+completion. Existing-account stdin mode also requires the saved API key to
+match its input. If setup has not completed, rerun the appropriate setup mode
+and resolve the reported failure; do not print the configuration to check a
+key. `API Key match: true` is a local check, not remote authentication. For
+older installations with a complete configuration, the
 no-argument command can perform a one-time migration; see
 [setup-completion behavior](configuration.md#setup-automatic-update-and-package-transition-state).
 
