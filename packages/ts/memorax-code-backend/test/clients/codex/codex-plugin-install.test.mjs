@@ -653,7 +653,7 @@ test("memorax-code uninstall retains the plugin when the Codex Hook adapter cann
   }
 });
 
-test("memorax-code uninstall preserves Codex artifacts and npm installation after native removal fails", async () => {
+test("memorax-code uninstall preserves Codex artifacts after native removal fails and completes when registration is absent", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-uninstall-native-failure-"));
   const home = join(root, "home");
   const codexHome = join(home, "codex-home");
@@ -679,6 +679,16 @@ const expected = process.env.TEST_CODEX_REMOVE_FAILURE === "plugin"
 if (process.env.TEST_CODEX_REMOVE_FAILURE && expected.every((part, index) => args[index] === part)) {
   console.error("fixture: native registry permission denied");
   process.exit(1);
+}
+if (process.env.TEST_CODEX_REGISTRATION_ABSENT && args[0] === "plugin") {
+  if (args[1] === "remove") {
+    console.error("plugin memorax-code-codex-adapter@memorax-code is not installed");
+    process.exit(1);
+  }
+  if (args[1] === "marketplace" && args[2] === "remove") {
+    console.error(${JSON.stringify("marketplace `memorax-code` is not configured or installed")});
+    process.exit(1);
+  }
 }
 `);
     await chmod(fakeCodex, 0o755);
@@ -715,9 +725,15 @@ if (process.env.TEST_CODEX_REMOVE_FAILURE && expected.every((part, index) => arg
       await stat(join(cacheRoot, ".codex-plugin", "plugin.json"));
       await assert.rejects(readFile(npmLog, "utf8"), /ENOENT/);
     }
-    const retry = await runMemoraxCode(args, env);
+    const retry = await runMemoraxCode(args, { ...env, TEST_CODEX_REGISTRATION_ABSENT: "1" });
     assert.equal(retry.code, 0, `${retry.stdout}\n${retry.stderr}`);
-    assert.equal(JSON.parse(retry.stdout).codexPlugin.ok, true);
+    const report = JSON.parse(retry.stdout);
+    assert.equal(report.ok, true);
+    assert.equal(report.codexPlugin.ok, true);
+    assert.equal(report.codexPlugin.pluginRemove.ok, true);
+    assert.match(report.codexPlugin.pluginRemove.stderr, /not configured or installed/);
+    assert.equal(report.codexPlugin.marketplaceChanged, true);
+    assert.equal(report.npmPackageRemoval.ok, true);
     await assert.rejects(stat(join(pluginSourcePath, ".codex-plugin", "plugin.json")), /ENOENT/);
     await assert.rejects(stat(cacheRoot), /ENOENT/);
     assert.deepEqual(JSON.parse(await readFile(npmLog, "utf8")), ["uninstall", "-g", "@memorax/memorax-code"]);

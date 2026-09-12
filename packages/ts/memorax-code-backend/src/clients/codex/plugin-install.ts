@@ -407,7 +407,7 @@ async function removeActivatedCodexPlugin(
   const marketplace = await runCommand(codexCommand, ["plugin", "marketplace", "remove", CLI_MARKETPLACE_NAME], { cwd: workspace, env });
   if (commandUnavailable(marketplace)) return { ...marketplace, ok: true, skipped: true, reason: "codex_cli_unavailable" };
   const results = [explicit, marketplace];
-  const failed = results.find((result) => !result.ok && !/not found|not installed|unknown marketplace/i.test(result.stderr || result.stdout));
+  const failed = results.find((result) => !result.ok && !/not found|not installed|not configured or installed|unknown marketplace/i.test(result.stderr || result.stdout));
   if (failed) return failed;
   return {
     ok: true,
