@@ -6,6 +6,38 @@ behavior.
 
 ## Unreleased
 
+## [0.1.17] - 2026-09-12
+
+### Added
+
+- Added `memorax-code setup --existing-account --non-interactive` for coding
+  agents without an interactive terminal. It accepts one API key through stdin,
+  uses the detected username and language, preserves explicit client choices,
+  and checks that the saved key matches before completing setup.
+
+### Fixed
+
+- Removed hard-link claims from normal JSON lock acquisition and used direct
+  file removal for lock release, reducing failures under client deletion
+  protection. Concurrent stale-lock recovery releases losing claims before
+  slower process checks. Lock cleanup failures now retain the underlying error
+  instead of silently reporting success.
+- Reused complete, unchanged Codex and CodeBuddy/WorkBuddy plugin artifacts
+  during setup and activation. Skills already included in a copied plugin are
+  no longer deleted and copied again; changed or incomplete artifacts are
+  still repaired.
+- Kept WorkBuddy's inherited configuration-directory alias from redirecting
+  standalone CodeBuddy CLI installation into the WorkBuddy directory.
+- Allowed Codex uninstall to finish when its marketplace is already absent,
+  and included underlying registration and activation errors in setup output.
+
+### Upgrade note
+
+The explicit non-interactive command replaces the saved API key. A reported
+key match verifies local persistence, not remote authentication. Interactive
+setup remains available, and guest setup still requires a terminal. See
+[non-interactive setup](docs/configuration.md#existing-account-setup-without-a-terminal).
+
 ## [0.1.16] - 2026-09-10
 
 ### Added
@@ -298,6 +330,7 @@ Later upgrades do not require this workaround.
 - Required a non-empty MemoraX user ID and API key during interactive setup,
   with clearer registration guidance.
 
+[0.1.17]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.17
 [0.1.15]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.15
 [0.1.14]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.14
 [0.1.10]: https://www.npmjs.com/package/@memorax/memorax-code/v/0.1.10
