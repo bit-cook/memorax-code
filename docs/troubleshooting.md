@@ -117,6 +117,9 @@ failure. For older installations with a complete configuration, the
 no-argument command can perform a one-time migration; see
 [setup-completion behavior](configuration.md#setup-automatic-update-and-package-transition-state).
 
+Codex plugin registration and activation failures include the underlying command
+error even without verbose output. Address that error before retrying setup.
+
 If lock release is blocked by filesystem permissions or a client's deletion
 protection, the command reports `failed to release JSON state lock` with the
 lock path and underlying error. Any preceding operation error is also retained;

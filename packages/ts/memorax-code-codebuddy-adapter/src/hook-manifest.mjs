@@ -56,6 +56,10 @@ export function codeBuddyUserPromptHookConfigured(settings, command, enabled) {
 export async function materializeCodeBuddyHookManifest(pluginRoot, platform = process.platform) {
   const path = join(pluginRoot, "hooks", "hooks.json");
   const manifest = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(path, `${JSON.stringify(configureCodeBuddyHookManifest(manifest, pluginRoot, platform), null, 2)}\n`, "utf8");
+}
+
+export function configureCodeBuddyHookManifest(manifest, pluginRoot, platform = process.platform) {
   // Global prompt Hooks load before WorkBuddy's asynchronous plugin discovery.
   // Keep only one prompt path when refreshing an existing plugin cache.
   delete manifest.hooks.UserPromptSubmit;
@@ -65,7 +69,7 @@ export async function materializeCodeBuddyHookManifest(pluginRoot, platform = pr
     if (hooks.length === 0) throw new Error(`CodeBuddy Hook manifest is missing ${event}`);
     for (const hook of hooks) hook.command = command;
   }
-  await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  return manifest;
 }
 
 export async function codeBuddyHookManifestConfigured(pluginRoot, platform = process.platform) {

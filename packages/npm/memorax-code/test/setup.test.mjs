@@ -193,6 +193,7 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     "hooks/client-hook-launcher.mjs",
     "clients/codebuddy-command.mjs",
     "windows-directory-retry.mjs",
+    "file-tree-match.mjs",
     "clients/codex-plugin-artifact.mjs",
     "automatic-update-state.mjs",
     "config-utils.mjs",
@@ -327,6 +328,10 @@ async function runSetup({ existingCache = false, explicitCache = false, codexReg
     `if (process.env.MEMORAX_CODE_DSH_ADAPTER_OPTIONAL === '1') appendFileSync(${JSON.stringify(logPath)}, 'dsh-adapter-optional ' + process.argv[2] + '\\n');`,
     `if (process.argv[2] === 'codex-plugin') appendFileSync(${JSON.stringify(logPath)}, 'codex-runtime ' + (process.env.CODEX_CLI_PATH ?? '') + '\\n');`,
     "if (process.argv[2] === '--version') { console.log('memorax-code 0.1.1-test'); process.exit(0); }",
+    "if (process.argv[2] === 'codex-plugin' && process.argv[3] === process.env.MEMORAX_CODE_TEST_PLUGIN_FAIL_ACTION) {",
+    "  console.error('fixture plugin failure: SAFE_DELETE_BULK_CONFIRM_REQUIRED');",
+    "  process.exit(7);",
+    "}",
     "if (process.argv[2] === 'codex-plugin' && process.argv[3] === 'registration') {",
     `  const registered = ${JSON.stringify(codexRegistered ?? (existingCache || explicitCache))};`,
     "  console.log(JSON.stringify({ ok: true, action: 'codex-plugin-registration', available: registered, registered, enabled: registered, version: registered ? '0.1.0' : undefined }));",
@@ -790,6 +795,28 @@ function codexVsCodePlatformDirectory() {
   return `${process.platform}-${process.arch}`;
 }
 
+
+test("setup reports Codex install and activation failures without verbose output", async () => {
+  for (const action of ["install", "activate"]) {
+    const run = await runSetup({
+      codexRegistered: false,
+      memoraxEnv: {
+        MEMORAX_CODE_SETUP_VERBOSE: "0",
+        MEMORAX_CODE_TEST_PLUGIN_FAIL_ACTION: action,
+      },
+    });
+    try {
+      assert.match(run.result.stderr, /fixture plugin failure: SAFE_DELETE_BULK_CONFIRM_REQUIRED/);
+      if (action === "install") {
+        assert.equal(run.result.code, 1);
+        await assertSetupIncomplete(run);
+        assert.doesNotMatch(run.log, /^memorax-code start/m);
+      }
+    } finally {
+      await rm(run.root, { recursive: true, force: true });
+    }
+  }
+});
 
 test("setup update mode skips MemoraX credentials and silently trusts verified Hook changes", async () => {
   const added = codexHook("update-review", "sha256:update-review");

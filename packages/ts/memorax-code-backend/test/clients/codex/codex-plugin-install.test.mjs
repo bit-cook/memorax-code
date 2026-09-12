@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import fs, { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  activateCodexPlugin,
+  installCodexPlugin,
   isCodexPluginActive,
   isCodexPluginStaged,
   removeCodexPlugin,
@@ -247,6 +250,45 @@ test("codex-plugin install refreshes an existing explicit CLI marketplace source
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("bootstrap install and activation reuse complete artifacts and repair drift", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-codex-reuse-"));
+  t.after(async () => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  });
+  const options = { homeDir: root, codexHome: join(root, "codex"), codexCommand: join(root, "missing-codex"), workspace: root };
+  const first = await installCodexPlugin(options);
+  const source = first.pluginSourcePath;
+  const marketplaceRoot = join(options.codexHome, ".memorax-code", "marketplaces", "memorax-code");
+  const marketplacePlugin = join(marketplaceRoot, "plugins", "memorax-code-codex-adapter");
+  const originalRemove = fs.rm;
+  let protect = true;
+  t.mock.method(fs, "rm", async (path, ...args) => {
+    if (protect && [source, marketplaceRoot].includes(path) && await stat(path).then(() => true, () => false)) {
+      throw new Error("Deleting an unchanged plugin requires confirmation");
+    }
+    return originalRemove(path, ...args);
+  });
+  syncBuiltinESMExports();
+  await installCodexPlugin(options);
+  // A missing fake CLI stops activation after local staging, without touching a native client.
+  await assert.rejects(activateCodexPlugin(options), /codex plugin list failed:.*ENOENT/);
+  await installCodexPlugin(options);
+  const expectedHook = await readFile(join(source, "hooks", "runtime-hook.mjs"));
+  protect = false;
+  await rm(join(source, "hooks", "runtime-hook.mjs"));
+  await writeFile(join(marketplacePlugin, "stale.txt"), "old artifact");
+  await installCodexPlugin(options);
+  assert.deepEqual(await readFile(join(source, "hooks", "runtime-hook.mjs")), expectedHook);
+  await assert.rejects(stat(join(marketplacePlugin, "stale.txt")), /ENOENT/);
+  await writeFile(join(source, "src", "config.mjs"), "// modified installed source\n");
+  await installCodexPlugin(options);
+  assert.doesNotMatch(await readFile(join(source, "src", "config.mjs"), "utf8"), /modified installed source/);
+  protect = true;
+  await installCodexPlugin(options);
 });
 
 test("codex-plugin install publishes B, preserves A, and reuses same-version artifacts", async () => {

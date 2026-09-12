@@ -1041,6 +1041,10 @@ phases of the same build; packed-file and extracted-tarball checks run after
   described in the [control plane](#31-installation-and-lifecycle-control-plane).
   DSH additionally materializes per-user runtime generations from read-only
   staged source; its Profile artifact excludes lifecycle control-plane code.
+  Codex and CodeBuddy/WorkBuddy reuse complete, unchanged plugin artifacts and
+  repair changed or incomplete copies. Shared file comparison lives in
+  adapter-common; native installers own artifact layouts, transformations, and
+  metadata. A Skill already present in a copied plugin needs no second copy.
 - Installed wrappers use [run-entrypoint.mjs](packages/npm/memorax-code/lib/run-entrypoint.mjs)
   to locate staged Backend and adapter entrypoints.
 - Artifact gates reject undeclared paths, unsafe symlinks, cache/build debris,
