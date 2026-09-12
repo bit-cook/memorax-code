@@ -923,12 +923,19 @@ Repo Memory. State shared across processes requires a bounded lock, atomic
 replacement, or version validation appropriate to its record. An in-memory
 mutex is not cross-process authority.
 
-Shared JSON file locks publish a complete owner record through an exclusive
-same-directory hard link. An unfinished owner record is never visible at the
-public lock path. Private publication and stale-reaper claims share the
-versioned, process-qualified claim namespace so abandoned claims remain
-recoverable. Lock storage must support hard links; unsupported storage fails
-closed rather than falling back to an incomplete or unlocked publication.
+Shared JSON file locks acquire ownership by exclusively creating the lock file,
+then writing its process-qualified owner record. Before entering the critical
+section, the held descriptor and lock path must identify the same file with one
+link; an earlier stale-reaper claim keeps acquisition waiting or retrying. A
+cancelled or timed-out pending publication clears its owner record through the
+held descriptor, leaving it recoverable without deleting a reaper's current path.
+Normal acquisition does not create a hard-link claim. An incomplete owner record
+remains subject to the stale threshold. Stale-owner recovery still
+uses versioned, process-qualified hard-link claims to coordinate competing
+reapers; that recovery requires same-directory hard-link support and actual
+unlink semantics for claim cleanup. Release checks the owner before deleting
+and reports read or deletion failures, retaining any preceding operation error.
+Missing locks or records that cannot prove ownership are left untouched.
 CodeBuddy Hook pending state uses this shared lock and private atomic record
 publication. Its legacy directory lock retains the same path and blocks new
 acquisition until released; an unprovable abandoned directory is not removed

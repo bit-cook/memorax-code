@@ -68,39 +68,46 @@ test("JSON state lock wait is bounded and releases the owning lock", async () =>
   }
 });
 
-test("JSON state locks publish complete owner records before becoming visible", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-publication-"));
+test("JSON state locks acquire repeatedly without creating recycled reap claims", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-acquisition-"));
   const path = join(root, "state.json");
   const lockPath = `${path}.lock`;
-  const originalWrite = fs.writeFileSync;
-  let ownerWrites = 0;
-  fs.writeFileSync = (target, content, ...options) => {
-    if (typeof content === "string" && content.includes('"ownerId"')) {
-      ownerWrites += 1;
-      assert.equal(fs.existsSync(lockPath), false, "an incomplete owner record must not be visible to stale-lock reapers");
+  const recycledPath = join(root, "recycled");
+  await mkdir(recycledPath);
+  const originalRemove = fs.rmSync;
+  let recycledClaims = 0;
+  fs.rmSync = (target, ...options) => {
+    if (typeof target === "string" && target.startsWith(`${lockPath}.reap-`)) {
+      // Recycling preserves the inode's link count even after the claim leaves this directory.
+      fs.renameSync(target, join(recycledPath, String(recycledClaims++)));
+      return;
     }
-    return originalWrite(target, content, ...options);
+    return originalRemove(target, ...options);
   };
   syncBuiltinESMExports();
   try {
-    for (const acquire of [withJsonFileLock, withJsonFileLockAsync]) {
+    for (const acquire of [withJsonFileLock, withJsonFileLockAsync, withJsonFileLock, withJsonFileLockAsync]) {
       await acquire(path, () => {
+        // The callback requires complete owner data, not atomic visibility during the preceding write.
         const owner = JSON.parse(fs.readFileSync(lockPath, "utf8"));
         assert.equal(owner.pid, process.pid);
         assert.equal(owner.version, 1);
         assert.match(owner.ownerId, new RegExp(`^${process.pid}:`));
+        assert.equal(fs.statSync(lockPath).nlink, 1, "normal acquisition must not leave a recycled hard-link alias");
       });
       await assert.rejects(access(lockPath), /ENOENT/);
+      assert.deepEqual(fs.readdirSync(root), ["recycled"]);
+      assert.deepEqual(fs.readdirSync(recycledPath), []);
     }
-    assert.equal(ownerWrites, 2);
+    assert.equal(recycledClaims, 0);
   } finally {
-    fs.writeFileSync = originalWrite;
+    fs.rmSync = originalRemove;
     syncBuiltinESMExports();
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("JSON state lock owner-write failure cleans its private claim without removing a concurrent owner", async () => {
+test("JSON state lock owner-write failure preserves a replacement owner", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-write-failure-"));
   const path = join(root, "state.json");
   const lockPath = `${path}.lock`;
@@ -120,6 +127,171 @@ test("JSON state lock owner-write failure cleans its private claim without remov
     assert.deepEqual(fs.readdirSync(root), ["state.json.lock"]);
   } finally {
     fs.writeFileSync = originalWrite;
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JSON state lock owner-write failure retains an incomplete record for stale recovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-incomplete-"));
+  const path = join(root, "state.json");
+  const lockPath = `${path}.lock`;
+  const originalWrite = fs.writeFileSync;
+  const writeFailure = Object.assign(new Error("owner record write failed"), { code: "EIO" });
+  let operationCalled = false;
+  fs.writeFileSync = (target) => {
+    originalWrite(target, '{"version":');
+    throw writeFailure;
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => withJsonFileLock(path, () => { operationCalled = true; }), error => error === writeFailure);
+    assert.equal(operationCalled, false);
+    assert.equal(fs.readFileSync(lockPath, "utf8"), '{"version":');
+    assert.deepEqual(fs.readdirSync(root), ["state.json.lock"]);
+
+    fs.writeFileSync = originalWrite;
+    syncBuiltinESMExports();
+    const staleTime = new Date(Date.now() - 1000);
+    await utimes(lockPath, staleTime, staleTime);
+    assert.equal(withJsonFileLock(path, () => "recovered", {
+      timeoutMs: 100,
+      retryMs: 5,
+      staleMs: 20,
+    }), "recovered");
+    await assert.rejects(access(lockPath), /ENOENT/);
+  } finally {
+    fs.writeFileSync = originalWrite;
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JSON state lock release reports blocked cleanup and preserves the operation error", async (t) => {
+  for (const acquire of [withJsonFileLock, withJsonFileLockAsync]) {
+    for (const failedOperation of [false, true]) {
+      await t.test(`${acquire.name}: operation ${failedOperation ? "failed" : "succeeded"}`, async () => {
+        const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-release-"));
+        const path = join(root, "state.json");
+        const lockPath = `${path}.lock`;
+        const originalUnlink = fs.unlinkSync;
+        const deleteFailure = new Error("[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] confirmation required");
+        const operationFailure = Object.assign(new Error("client setup failed"), { code: "CLIENT_SETUP_FAILED" });
+        let operationCalled = false;
+        let deleteAttempts = 0;
+        fs.unlinkSync = (target) => {
+          if (target !== lockPath) return originalUnlink(target);
+          deleteAttempts += 1;
+          throw deleteFailure;
+        };
+        syncBuiltinESMExports();
+        try {
+          await assert.rejects(async () => acquire(path, () => {
+            operationCalled = true;
+            if (failedOperation) throw operationFailure;
+            return "complete";
+          }), (error) => {
+            assert.equal(error.code, "JSON_FILE_LOCK_RELEASE_FAILED");
+            assert.equal(error.lockPath, lockPath);
+            assert.ok(error.message.includes(lockPath));
+            assert.match(error.message, /SAFE_DELETE_BULK_CONFIRM_REQUIRED/);
+            if (failedOperation) {
+              assert.ok(error instanceof AggregateError);
+              assert.equal(error.cause, operationFailure);
+              assert.equal(error.errors[0], operationFailure);
+              assert.equal(error.errors[1].cause, deleteFailure);
+              assert.match(error.message, /client setup failed/);
+            } else {
+              assert.equal(error.cause, deleteFailure);
+            }
+            return true;
+          });
+          assert.equal(operationCalled, true);
+          assert.equal(deleteAttempts, 1);
+          await access(lockPath);
+        } finally {
+          fs.unlinkSync = originalUnlink;
+          syncBuiltinESMExports();
+          await rm(root, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+});
+
+test("JSON state lock release preserves unknown ownership but reports unreadable locks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-release-owner-"));
+  const path = join(root, "state.json");
+  const lockPath = `${path}.lock`;
+  const originalRead = fs.readFileSync;
+  const readFailure = Object.assign(new Error("lock read denied"), { code: "EACCES" });
+  try {
+    for (const acquire of [withJsonFileLock, withJsonFileLockAsync]) {
+      assert.equal(await acquire(path, () => {
+        fs.unlinkSync(lockPath);
+        return "missing";
+      }), "missing");
+      await assert.rejects(access(lockPath), /ENOENT/);
+
+      const replacement = JSON.stringify({ ownerId: "replacement-owner" });
+      assert.equal(await acquire(path, () => {
+        fs.writeFileSync(lockPath, replacement);
+        return "replaced";
+      }), "replaced");
+      assert.equal(await readFile(lockPath, "utf8"), replacement);
+      await rm(lockPath);
+
+      await assert.rejects(async () => acquire(path, () => {
+        fs.readFileSync = (target, ...options) => {
+          if (target === lockPath) throw readFailure;
+          return originalRead(target, ...options);
+        };
+        syncBuiltinESMExports();
+      }), (error) => error.code === "JSON_FILE_LOCK_RELEASE_FAILED" && error.cause === readFailure);
+      fs.readFileSync = originalRead;
+      syncBuiltinESMExports();
+      await access(lockPath);
+      await rm(lockPath);
+    }
+  } finally {
+    fs.readFileSync = originalRead;
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JSON state lock owner-write failure also reports blocked release", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-write-release-"));
+  const path = join(root, "state.json");
+  const lockPath = `${path}.lock`;
+  const originalWrite = fs.writeFileSync;
+  const originalUnlink = fs.unlinkSync;
+  const writeFailure = Object.assign(new Error("owner record write failed"), { code: "EIO" });
+  const deleteFailure = Object.assign(new Error("lock delete denied"), { code: "EPERM" });
+  fs.writeFileSync = (...args) => {
+    originalWrite(...args);
+    throw writeFailure;
+  };
+  fs.unlinkSync = (target) => {
+    if (target === lockPath) throw deleteFailure;
+    return originalUnlink(target);
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => withJsonFileLock(path, () => assert.fail("must not enter the critical section")), (error) => {
+      assert.equal(error.code, "JSON_FILE_LOCK_RELEASE_FAILED");
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.cause, writeFailure);
+      assert.equal(error.errors[0], writeFailure);
+      assert.equal(error.errors[1].cause, deleteFailure);
+      assert.match(error.message, /owner record write failed/);
+      assert.match(error.message, /lock delete denied/);
+      return true;
+    });
+    await access(lockPath);
+  } finally {
+    fs.writeFileSync = originalWrite;
+    fs.unlinkSync = originalUnlink;
     syncBuiltinESMExports();
     await rm(root, { recursive: true, force: true });
   }
@@ -303,6 +475,151 @@ test("JSON state lock bypasses an orphaned current reap claim", async () => {
     await assert.rejects(access(lockPath), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("contending stale reapers withdraw without spending the wait budget on claim reads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-reaper-contention-"));
+  const path = join(root, "state.json");
+  const lockPath = `${path}.lock`;
+  const competingClaim = `${lockPath}.reap-held-fixture`;
+  const originalRead = fs.readFileSync;
+  const originalRemove = fs.rmSync;
+  const originalNow = Date.now;
+  let readDelayMs = 0;
+  const isOwnClaim = (target) => typeof target === "string"
+    && target.startsWith(`${lockPath}.reap-v1-`);
+  try {
+    await writeFile(lockPath, '{"version":1,"ownerId":"abandoned"}\n');
+    const staleTime = new Date(Date.now() - 60000);
+    await utimes(lockPath, staleTime, staleTime);
+    await link(lockPath, competingClaim);
+    Date.now = () => originalNow() + readDelayMs;
+    fs.readFileSync = (target, ...args) => {
+      if (isOwnClaim(target) && fs.existsSync(competingClaim)) {
+        // Model slow claim I/O while another reaper holds a claim, without sleeping.
+        readDelayMs += 2000;
+      }
+      return originalRead(target, ...args);
+    };
+    fs.rmSync = (target, ...args) => {
+      const result = originalRemove(target, ...args);
+      if (isOwnClaim(target)) {
+        // The other reaper drops its claim after this contender withdraws.
+        originalRemove(competingClaim, { force: true });
+      }
+      return result;
+    };
+    syncBuiltinESMExports();
+
+    assert.equal(withJsonFileLock(path, () => "recovered"), "recovered");
+    assert.deepEqual(fs.readdirSync(root), []);
+  } finally {
+    Date.now = originalNow;
+    fs.readFileSync = originalRead;
+    fs.rmSync = originalRemove;
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JSON state lock retries when its unpublished owner is reaped", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-unpublished-"));
+  const path = join(root, "state.json");
+  const releaseReplacement = deferred();
+  const originalWrite = fs.writeFileSync;
+  const order = [];
+  let replaceBeforeWrite = true;
+  let first;
+  let replacement;
+  fs.writeFileSync = (descriptor, ...args) => {
+    if (replaceBeforeWrite && typeof descriptor === "number") {
+      replaceBeforeWrite = false;
+      const staleTime = new Date(Date.now() - 1000);
+      fs.futimesSync(descriptor, staleTime, staleTime);
+      replacement = withJsonFileLockAsync(path, async () => {
+        order.push("replacement:start");
+        await releaseReplacement.promise;
+        order.push("replacement:end");
+      }, { timeoutMs: 500, retryMs: 2, staleMs: 20 });
+    }
+    return originalWrite(descriptor, ...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    first = withJsonFileLockAsync(path, () => { order.push("first"); }, {
+      timeoutMs: 500, retryMs: 2, staleMs: 20,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(order, ["replacement:start"]);
+    releaseReplacement.resolve();
+    await Promise.all([first, replacement]);
+    assert.deepEqual(order, ["replacement:start", "replacement:end", "first"]);
+    await assert.rejects(access(`${path}.lock`), /ENOENT/);
+  } finally {
+    fs.writeFileSync = originalWrite;
+    syncBuiltinESMExports();
+    releaseReplacement.resolve();
+    await Promise.allSettled([first, replacement]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JSON state lock waits for an in-flight stale-reaper claim before entering", async (t) => {
+  for (const outcome of ["reaped", "timeout", "aborted"]) {
+    await t.test(outcome, async () => {
+      const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-publication-"));
+      const path = join(root, "state.json");
+      const lockPath = `${path}.lock`;
+      const claimPath = `${lockPath}.reap-paused-fixture`;
+      const originalWrite = fs.writeFileSync;
+      let pauseReaper = true;
+      let entered = false;
+      let acquisition;
+      fs.writeFileSync = (descriptor, ...args) => {
+        if (pauseReaper && typeof descriptor === "number") {
+          pauseReaper = false;
+          // A reaper checked the empty lock and paused just before unlinking it.
+          fs.linkSync(lockPath, claimPath);
+        }
+        return originalWrite(descriptor, ...args);
+      };
+      syncBuiltinESMExports();
+      try {
+        const controller = new AbortController();
+        const options = { timeoutMs: outcome === "timeout" ? 20 : 500, retryMs: 2, signal: controller.signal };
+        const operation = () => { entered = true; };
+        if (outcome === "timeout") {
+          assert.throws(() => withJsonFileLock(path, operation, options), { code: "JSON_FILE_LOCK_TIMEOUT" });
+        } else {
+          acquisition = withJsonFileLockAsync(path, operation, options);
+        }
+        assert.equal(entered, false);
+        if (outcome === "reaped") {
+          fs.unlinkSync(lockPath);
+          fs.unlinkSync(claimPath);
+          await acquisition;
+          assert.equal(entered, true);
+        } else {
+          if (outcome === "aborted") {
+            controller.abort();
+            await assert.rejects(acquisition, { code: "JSON_FILE_LOCK_ABORTED" });
+          }
+          assert.equal(await readFile(lockPath, "utf8"), "");
+          fs.unlinkSync(claimPath);
+          const staleTime = new Date(Date.now() - 1000);
+          await utimes(lockPath, staleTime, staleTime);
+          assert.equal(withJsonFileLock(path, () => "recovered", { staleMs: 20 }), "recovered");
+        }
+        await assert.rejects(access(lockPath), /ENOENT/);
+      } finally {
+        fs.writeFileSync = originalWrite;
+        syncBuiltinESMExports();
+        await rm(claimPath, { force: true });
+        await acquisition?.catch(() => undefined);
+        await rm(root, { recursive: true, force: true });
+      }
+    });
   }
 });
 
