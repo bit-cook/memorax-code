@@ -478,6 +478,51 @@ test("JSON state lock bypasses an orphaned current reap claim", async () => {
   }
 });
 
+test("contending stale reapers withdraw without spending the wait budget on claim reads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-reaper-contention-"));
+  const path = join(root, "state.json");
+  const lockPath = `${path}.lock`;
+  const competingClaim = `${lockPath}.reap-held-fixture`;
+  const originalRead = fs.readFileSync;
+  const originalRemove = fs.rmSync;
+  const originalNow = Date.now;
+  let readDelayMs = 0;
+  const isOwnClaim = (target) => typeof target === "string"
+    && target.startsWith(`${lockPath}.reap-v1-`);
+  try {
+    await writeFile(lockPath, '{"version":1,"ownerId":"abandoned"}\n');
+    const staleTime = new Date(Date.now() - 60000);
+    await utimes(lockPath, staleTime, staleTime);
+    await link(lockPath, competingClaim);
+    Date.now = () => originalNow() + readDelayMs;
+    fs.readFileSync = (target, ...args) => {
+      if (isOwnClaim(target) && fs.existsSync(competingClaim)) {
+        // Model slow claim I/O while another reaper holds a claim, without sleeping.
+        readDelayMs += 2000;
+      }
+      return originalRead(target, ...args);
+    };
+    fs.rmSync = (target, ...args) => {
+      const result = originalRemove(target, ...args);
+      if (isOwnClaim(target)) {
+        // The other reaper drops its claim after this contender withdraws.
+        originalRemove(competingClaim, { force: true });
+      }
+      return result;
+    };
+    syncBuiltinESMExports();
+
+    assert.equal(withJsonFileLock(path, () => "recovered"), "recovered");
+    assert.deepEqual(fs.readdirSync(root), []);
+  } finally {
+    Date.now = originalNow;
+    fs.readFileSync = originalRead;
+    fs.rmSync = originalRemove;
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("JSON state lock retries when its unpublished owner is reaped", async () => {
   const root = await mkdtemp(join(tmpdir(), "memorax-code-json-lock-unpublished-"));
   const path = join(root, "state.json");

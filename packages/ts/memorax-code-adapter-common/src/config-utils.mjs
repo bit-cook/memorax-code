@@ -304,9 +304,11 @@ function removeStaleJsonFileLock(lockPath, staleMs, observedProcessStarts) {
     return false;
   }
   try {
-    if (readFileSync(claimPath, "utf8") !== snapshot.raw) return false;
+    // Reject ineligible claims before potentially slow content reads, so losing
+    // reapers promptly drop their claims instead of stalling each other.
     const claim = statSync(claimPath);
     if (claim.dev !== snapshot.dev || claim.ino !== snapshot.ino || claim.nlink !== 2) return false;
+    if (readFileSync(claimPath, "utf8") !== snapshot.raw) return false;
     // Check the path last: two detached claims must not count as lock + claim.
     const current = statSync(lockPath);
     if (current.dev !== claim.dev || current.ino !== claim.ino || current.nlink !== 2) return false;
