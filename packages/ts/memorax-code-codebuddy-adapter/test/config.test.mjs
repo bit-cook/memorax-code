@@ -40,6 +40,51 @@ test("selects independent native homes and command overrides", () => {
   assert.throws(() => resolveHookCodeBuddyCommand({ env: { CODEBUDDY_CLI_PATH: "/cli" }, client: "workbuddy", platform: "linux", pathExists: () => false }), /WorkBuddy runtime is unavailable/);
 });
 
+test("distinguishes WorkBuddy's compatibility config alias from independent CLI overrides", () => {
+  for (const [platform, home, pathJoin] of [["darwin", "/fixture-user", join], ["linux", "/fixture-user", join], ["win32", "C:\\Users\\tester", win32.join]]) {
+    const cliHome = pathJoin(home, ".codebuddy");
+    const nativeHome = pathJoin(home, "workbuddy-config");
+    const alias = platform === "win32" ? `${nativeHome.toUpperCase().replaceAll("\\", "/")}/.` : `${nativeHome}/.`;
+    const env = { CODEBUDDY_CONFIG_DIR: alias, WORKBUDDY_CONFIG_DIR: nativeHome };
+    assert.equal(defaultCodeBuddyHome(env, home, platform), cliHome);
+    assert.equal(defaultWorkBuddyHome(env, home, platform), nativeHome);
+    assert.equal(defaultCodeBuddyHome({ CODEBUDDY_CONFIG_DIR: nativeHome }, home, platform), nativeHome);
+    assert.equal(defaultCodeBuddyHome({ ...env, CODEBUDDY_CONFIG_DIR: cliHome }, home, platform), cliHome);
+    assert.equal(defaultCodeBuddyHome({ ...env, CODEBUDDY_HOME: nativeHome }, home, platform), nativeHome);
+    assert.equal(defaultWorkBuddyHome({ ...env, WORKBUDDY_HOME: cliHome }, home, platform), cliHome);
+  }
+});
+
+test("installs and reuses separate client targets from WorkBuddy's inherited environment", async (t) => {
+  const profile = await realpath(await mkdtemp(join(tmpdir(), "memorax-workbuddy-environment-")));
+  t.after(() => rm(profile, { recursive: true, force: true }));
+  const cliHome = join(profile, ".codebuddy");
+  const workBuddyHome = join(profile, ".workbuddy");
+  const memoraxCodeHome = join(profile, ".memorax-code");
+  const env = { ...process.env, HOME: profile, USERPROFILE: profile, MEMORAX_CODE_HOME: memoraxCodeHome,
+    CODEBUDDY_HOME: "", WORKBUDDY_HOME: "", CODEBUDDY_CONFIG_DIR: workBuddyHome, WORKBUDDY_CONFIG_DIR: workBuddyHome,
+    MEMORAX_CODE_CODEBUDDY_COMMAND: "fixture-cli", MEMORAX_CODE_WORKBUDDY_COMMAND: "fixture-workbuddy",
+  };
+  const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (const [client, home] of [["codebuddy", cliHome], ["workbuddy", workBuddyHome]]) {
+      const result = spawnSync(process.execPath, [cli, "enable", "--client", client, "--json"], {
+        cwd: profile, env, encoding: "utf8", timeout: 15_000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.codeBuddyHome, home);
+      assert.equal(report.enabled, true);
+      const retained = JSON.parse(await readFile(join(memoraxCodeHome, "adapters", client, "installation.json"), "utf8"));
+      assert.equal(retained.client, client);
+      assert.equal(retained.codeBuddyHome, home);
+      const metadata = JSON.parse(await readFile(join(codeBuddyInstallPath(home), ".memorax-code-package.json"), "utf8"));
+      assert.equal(metadata.client, client);
+      assert.equal(metadata.codeBuddyHome, home);
+    }
+  }
+});
+
 test("builds a native Windows Hook command without the WorkBuddy root placeholder", () => {
   assert.equal(
     codeBuddyHookCommand("C:\\Users\\tester\\.codebuddy\\plugins\\memorax", "win32"),
@@ -295,7 +340,7 @@ test("adapter CLI retains an absolute installation target across process cwd and
 test("recognizes legacy WorkBuddy roots without claiming independent CLI installations", async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "memorax-codebuddy-legacy-roots-")));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const homeKeys = ["HOME", "USERPROFILE", "CODEBUDDY_HOME", "CODEBUDDY_CONFIG_DIR", "WORKBUDDY_HOME"];
+  const homeKeys = ["HOME", "USERPROFILE", "CODEBUDDY_HOME", "CODEBUDDY_CONFIG_DIR", "WORKBUDDY_HOME", "WORKBUDDY_CONFIG_DIR"];
   const previousEnv = { ...process.env };
   t.after(() => {
     for (const key of homeKeys) {
@@ -308,6 +353,7 @@ test("recognizes legacy WorkBuddy roots without claiming independent CLI install
     ["default", ".workbuddy", {}, "workbuddy"],
     ["configured", "custom-native", { configured: true }, "workbuddy"],
     ["environment", "custom-native", { environment: true }, "workbuddy"],
+    ["native-environment", "custom-native", { nativeEnvironment: true }, "workbuddy"],
     ["cli", ".codebuddy", {}, "codebuddy"],
     ["explicit-cli", ".workbuddy", { client: "codebuddy" }, "codebuddy"],
   ]) {
@@ -316,6 +362,7 @@ test("recognizes legacy WorkBuddy roots without claiming independent CLI install
     Object.assign(process.env, { HOME: homeDir, USERPROFILE: homeDir,
       CODEBUDDY_HOME: join(homeDir, ".codebuddy"), CODEBUDDY_CONFIG_DIR: "",
       WORKBUDDY_HOME: overrides.environment ? nativeHome : "",
+      WORKBUDDY_CONFIG_DIR: overrides.nativeEnvironment ? nativeHome : "",
     });
     const options = { memoraxCodeHome: join(homeDir, "state"),
       ...(overrides.configured ? { workBuddyHome: nativeHome } : {}),

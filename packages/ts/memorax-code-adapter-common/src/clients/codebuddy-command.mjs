@@ -10,13 +10,21 @@ const WINDOWS_SEGMENTS = [
 ];
 
 export function defaultCodeBuddyHome(env = process.env, homeDir = homedir(), platform = process.platform) {
-  return stringValue(env.CODEBUDDY_HOME)
-    ?? stringValue(env.CODEBUDDY_CONFIG_DIR)
-    ?? (platform === "win32" ? win32.join : join)(homeDir, ".codebuddy");
+  const configured = stringValue(env.CODEBUDDY_HOME);
+  if (configured) return configured;
+  const configDir = stringValue(env.CODEBUDDY_CONFIG_DIR);
+  const workBuddyConfigDir = stringValue(env.WORKBUDDY_CONFIG_DIR);
+  const normalizeHome = platform === "win32"
+    ? (home) => win32.resolve(home).toLowerCase()
+    : resolve;
+  // WorkBuddy also exports its native home as CODEBUDDY_CONFIG_DIR for compatibility.
+  // That alias must not redirect the standalone CLI into WorkBuddy's installation.
+  if (configDir && (!workBuddyConfigDir || normalizeHome(configDir) !== normalizeHome(workBuddyConfigDir))) return configDir;
+  return (platform === "win32" ? win32.join : join)(homeDir, ".codebuddy");
 }
 
 export function defaultWorkBuddyHome(env = process.env, homeDir = homedir(), platform = process.platform) {
-  const configured = stringValue(env.WORKBUDDY_HOME);
+  const configured = stringValue(env.WORKBUDDY_HOME) ?? stringValue(env.WORKBUDDY_CONFIG_DIR);
   if (configured) return configured;
   const pathJoin = platform === "win32" ? win32.join : join;
   const legacyHome = pathJoin(homeDir, ".codebuddy");
@@ -33,7 +41,7 @@ export function codeBuddyMetadataClient(metadata, { workBuddyHome, env = process
   if (metadata?.client !== undefined) return undefined;
   if (!stringValue(metadata.codeBuddyCommand)) return undefined;
   const nativeHome = stringValue(metadata.codeBuddyHome);
-  const configuredHome = stringValue(workBuddyHome) ?? stringValue(env.WORKBUDDY_HOME);
+  const configuredHome = stringValue(workBuddyHome) ?? stringValue(env.WORKBUDDY_HOME) ?? stringValue(env.WORKBUDDY_CONFIG_DIR);
   const normalizeHome = platform === "win32"
     ? (home) => win32.resolve(home).toLowerCase()
     : resolve;

@@ -278,7 +278,13 @@ stop, update, uninstall, and Hook recovery:
 | Client | Default root | Root overrides | Runtime discovery |
 | --- | --- | --- | --- |
 | `codebuddy` | `~/.codebuddy` | `--codebuddy-home`, `CODEBUDDY_HOME`, then `CODEBUDDY_CONFIG_DIR` | Standalone `codebuddy` on PATH, or `MEMORAX_CODE_CODEBUDDY_COMMAND` / `CODEBUDDY_CLI_PATH` |
-| `workbuddy` | `~/.workbuddy` | `--workbuddy-home`, then `WORKBUDDY_HOME` | WorkBuddy's bundled runtime, or `MEMORAX_CODE_WORKBUDDY_COMMAND` / `WORKBUDDY_CODEBUDDY_PATH` |
+| `workbuddy` | `~/.workbuddy` | `--workbuddy-home`, `WORKBUDDY_HOME`, then `WORKBUDDY_CONFIG_DIR` | WorkBuddy's bundled runtime, or `MEMORAX_CODE_WORKBUDDY_COMMAND` / `WORKBUDDY_CODEBUDDY_PATH` |
+
+WorkBuddy also exports `CODEBUDDY_CONFIG_DIR` as a compatibility alias. When it
+points to the same directory as `WORKBUDDY_CONFIG_DIR`, MemoraX Code uses that
+directory for WorkBuddy and leaves CodeBuddy CLI at its default root. A distinct
+`CODEBUDDY_CONFIG_DIR` or an explicit `CODEBUDDY_HOME` / `--codebuddy-home` still
+overrides the CLI root.
 
 On Windows the default roots are under `%USERPROFILE%`. A proven legacy
 WorkBuddy installation may retain its existing `.codebuddy` location; that root
