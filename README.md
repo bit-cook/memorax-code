@@ -60,7 +60,7 @@ For DeepSeek Harness (DSH), current releases require Node.js
 Profile, and ensure `pnpm` is on `PATH` before running setup. MemoraX Code
 does not install or update DSH.
 
-On Linux, setup-managed credentials require `/usr/bin/secret-tool` from
+On Linux, guest credentials require `/usr/bin/secret-tool` from
 libsecret and an available Secret Service in the current user session. For
 Remote SSH, WSL, or Dev Containers, install MemoraX Code in the same environment
 as the coding agent. MemoraX search and writeback require network access.
@@ -87,6 +87,26 @@ memorax-code setup --existing-account
 ```
 
 Follow the setup prompts to enter your MemoraX username and API key locally.
+
+For a coding agent without an interactive terminal, pass the API key through
+stdin. The examples assume `MEMORAX_SETUP_API_KEY` is already provided by the
+caller. Do not put the key in command arguments or project files.
+
+```bash
+printf '%s\n' "$MEMORAX_SETUP_API_KEY" | memorax-code setup --existing-account --non-interactive
+```
+
+In Windows PowerShell:
+
+```powershell
+$env:MEMORAX_SETUP_API_KEY | memorax-code.cmd setup --existing-account --non-interactive
+```
+
+This explicit command replaces the saved key and uses the detected local
+username and system language. It reports `API Key match: true` after local
+configuration and readiness checks; this does not verify cloud credentials.
+See [non-interactive setup](docs/configuration.md#existing-account-setup-without-a-terminal)
+for input and reuse behavior.
 
 > [!TIP]
 > Using MemoraX Code across devices? Find the username and API key in the
@@ -161,8 +181,8 @@ For client-specific diagnostic commands, see
 ### Installation Troubleshooting
 
 Package installation does not launch setup automatically; run one of the setup
-commands above in an interactive terminal. For incomplete setup or unavailable
-memory, start with the status commands and follow
+commands above, using stdin mode when an agent has no interactive terminal.
+For incomplete setup or unavailable memory, start with the status commands and follow
 [Troubleshooting](docs/troubleshooting.md).
 
 #### Windows: `memorax-code` or `memorax-cli` Is Not Found

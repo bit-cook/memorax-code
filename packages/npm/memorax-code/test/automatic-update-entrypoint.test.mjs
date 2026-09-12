@@ -62,6 +62,7 @@ async function createFixture(t) {
     "lib/resolve-codex-command.mjs",
     "lib/resolve-codebuddy-command.mjs",
     "lib/run-entrypoint.mjs",
+    "lib/setup-api-key-input.mjs",
     "lib/vscode-extension-command.mjs",
     "lib/windows-cli-invocation.mjs",
     "lib/windows-user-path.mjs",

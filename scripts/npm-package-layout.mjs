@@ -52,6 +52,7 @@ const rootLibFiles = new Set([
   "lib/resolve-codebuddy-command.mjs",
   "lib/run-entrypoint.mjs",
   "lib/setup-memory-preferences.mjs",
+  "lib/setup-api-key-input.mjs",
   "lib/setup-reconcile.mjs",
   "lib/trial-plugin-mark.mjs",
   "lib/trial-provision-client.mjs",
@@ -152,6 +153,7 @@ export function isAllowedNpmPackPath(rawPath) {
 
 export function isReviewedCredentialRuntimePath(rawPath) {
   const path = String(rawPath).replaceAll("\\", "/");
+  if (path === "lib/setup-api-key-input.mjs") return true;
   const prefix = credentialRuntimePrefixes.find((candidate) => path.startsWith(candidate));
   return prefix !== undefined && reviewedCredentialFiles.has(path.slice(prefix.length));
 }

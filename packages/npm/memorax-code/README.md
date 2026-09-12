@@ -24,6 +24,20 @@ one, then run:
 memorax-code setup --existing-account
 ```
 
+For an agent without an interactive terminal, supply the key through stdin.
+This example assumes the caller already provided `MEMORAX_SETUP_API_KEY`:
+
+```bash
+printf '%s\n' "$MEMORAX_SETUP_API_KEY" | memorax-code setup --existing-account --non-interactive
+```
+
+In Windows PowerShell, use
+`$env:MEMORAX_SETUP_API_KEY | memorax-code.cmd setup --existing-account --non-interactive`.
+This command replaces the saved key, detects the local username and language,
+and checks the saved key without printing it. `API Key match: true` reports a
+local match, not cloud authentication. Input requirements and reuse behavior
+are described in `docs/configuration.md`.
+
 > Using MemoraX Code across devices? Find the MemoraX username and API key
 > needed by setup in the MemoraX Code configuration file on a configured device
 > (normally `~/.memorax-code/config.toml`), then enter them locally during setup
@@ -49,11 +63,11 @@ After obtaining the Mark ID, create your MemoraX account. The platform does
 not currently support attaching a Mark ID to an account that has already been
 registered.
 
-Both setup paths automatically detect supported coding agents. Later setup
-runs reuse a complete saved configuration; use
+Both account and guest setup automatically detect supported coding agents.
+Default setup reuses a complete saved configuration; use
 `memorax-code setup --reconfigure` to replace it.
 
-On Windows, interactive setup also verifies npm's global command directory and
+On Windows, setup also verifies npm's global command directory and
 adds it to the current setup process and the Windows user `PATH` when needed.
 If the current shell cannot find `memorax-code`, bootstrap setup with:
 

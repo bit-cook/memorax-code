@@ -9,6 +9,7 @@ import { stagePackagedClientHookRuntime } from "../lib/client-hook-runtime.mjs";
 import { unsupportedNodeVersionMessage } from "../lib/node-version.mjs";
 import { runNpmCommand } from "../lib/npm-invocation.mjs";
 import { ensureNpmPackageRuntimeEnv, runBackendEntrypoint } from "../lib/run-entrypoint.mjs";
+import { readSetupApiKey } from "../lib/setup-api-key-input.mjs";
 import { ensureWindowsNpmGlobalPath } from "../lib/windows-user-path.mjs";
 
 const nodeVersionError = unsupportedNodeVersionMessage();
@@ -45,7 +46,7 @@ function printMainHelp() {
   console.log(`Usage: memorax-code [command] [options]
 
 Commands:
-  setup       Run or repair the interactive setup
+  setup       Run or repair setup
   account     Manage local MemoraX account information
   start       Reconcile selected integrations and start the Backend
   status      Show Backend and integration status
@@ -74,13 +75,14 @@ Options:
 }
 
 function printSetupHelp() {
-  console.log(`Usage: memorax-code setup [--existing-account | --reconfigure] [--home DIR]
+  console.log(`Usage: memorax-code setup [--existing-account | --reconfigure] [--non-interactive] [--home DIR]
 
-Run interactive setup to configure or repair MemoraX Code. A complete existing
-configuration is reused automatically.
+Configure or repair MemoraX Code interactively, or use --existing-account
+--non-interactive with an API Key on stdin. Plain setup reuses a complete configuration.
 
 Options:
   --existing-account  Configure an existing account instead of anonymous access
+  --non-interactive   With --existing-account, read the API Key from stdin and use defaults without prompting
   --reconfigure       Re-detect memory preferences instead of reusing configuration
   --home DIR           Configure the specified MemoraX Code home
   -h, --help           Show this help message`);
@@ -279,15 +281,17 @@ async function runSetupCommand(args, { updateMode = false } = {}) {
   }
   let memoraxCodeHome;
   let setupMode;
+  let apiKey;
   try {
     memoraxCodeHome = requestedMemoraxCodeHome(args);
     setupMode = parseSetupMode(args);
+    if (args.includes("--non-interactive")) apiKey = await readSetupApiKey();
   } catch (error) {
     console.error(`memorax-code setup: ${error instanceof Error ? error.message : String(error)}`);
     printSetupHelp();
     return 2;
   }
-  if (!setupCanPrompt()) {
+  if (apiKey === undefined && !setupCanPrompt()) {
     console.error("memorax-code setup: an interactive terminal is required");
     return 1;
   }
@@ -309,6 +313,7 @@ async function runSetupCommand(args, { updateMode = false } = {}) {
       return await spawnSetupProcess(memoraxCodeHome, {
         updateMode,
         setupMode,
+        apiKey,
       });
     });
   } catch (error) {
@@ -388,6 +393,7 @@ function assertAccountArgs(args) {
 
 function parseSetupMode(args) {
   let setupMode = "automatic";
+  let nonInteractive = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--existing-account" || arg === "--reconfigure") {
@@ -396,14 +402,19 @@ function parseSetupMode(args) {
         throw new Error("--existing-account and --reconfigure cannot be used together");
       }
       setupMode = requestedMode;
+    } else if (arg === "--non-interactive") {
+      nonInteractive = true;
     } else if (arg === "--home") {
       const value = args[++index];
       if (!value || value.startsWith("--")) throw new Error("--home requires a directory");
     } else if (arg.startsWith("--home=")) {
       if (!arg.slice("--home=".length).trim()) throw new Error("--home requires a directory");
     } else {
-      throw new Error(`unknown option ${arg}`);
+      throw new Error("unknown setup option; see --help for supported input methods");
     }
+  }
+  if (nonInteractive && setupMode !== "existing-account") {
+    throw new Error("--non-interactive requires --existing-account");
   }
   return setupMode;
 }
@@ -444,7 +455,7 @@ function hasReadyMemoraxConfiguration(memoraxCodeHome) {
   return !result.error && !result.signal && result.status === 0;
 }
 
-async function spawnSetupProcess(memoraxCodeHome, { updateMode = false, setupMode = "automatic" } = {}) {
+async function spawnSetupProcess(memoraxCodeHome, { updateMode = false, setupMode = "automatic", apiKey } = {}) {
   ensureNpmPackageRuntimeEnv();
   const env = {
     ...process.env,
@@ -454,10 +465,18 @@ async function spawnSetupProcess(memoraxCodeHome, { updateMode = false, setupMod
   delete env.MEMORAX_CODE_SETUP_MODE;
   if (updateMode) env.MEMORAX_CODE_SETUP_UPDATE = "1";
   if (setupMode !== "automatic") env.MEMORAX_CODE_SETUP_MODE = setupMode;
-  const child = spawn(process.execPath, [join(packageRoot(), "bin", "memorax-code-setup.mjs")], {
-    stdio: "inherit",
+  const child = spawn(process.execPath, [
+    join(packageRoot(), "bin", "memorax-code-setup.mjs"),
+    ...(apiKey === undefined ? [] : ["--non-interactive"]),
+  ], {
+    stdio: apiKey === undefined ? "inherit" : ["pipe", "inherit", "inherit"],
     env,
   });
+  if (apiKey !== undefined) {
+    // The secret travels only through stdin, never child arguments or environment.
+    child.stdin.on("error", () => {}); // Early child failure is reported by its exit status.
+    child.stdin.end(apiKey);
+  }
   return await new Promise((resolve) => {
     child.on("error", (error) => {
       console.error(`memorax-code setup: failed to start setup: ${error.message}`);

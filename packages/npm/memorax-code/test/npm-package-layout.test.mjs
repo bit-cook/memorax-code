@@ -82,6 +82,8 @@ test("runtime package accepts the User Profile launcher and rejects Python artif
 });
 
 test("credential runtime allowlist accepts only reviewed main and marketplace files", () => {
+  assert.equal(isReviewedCredentialRuntimePath("lib/setup-api-key-input.mjs"), true);
+  assert.equal(isAllowedNpmPackFilePath("lib/setup-api-key-input.mjs"), true);
   const names = [
     "linux-secret-service.mjs",
     "macos-keychain.mjs",
@@ -104,6 +106,7 @@ test("credential runtime allowlist accepts only reviewed main and marketplace fi
     }
   }
   for (const path of [
+    "lib/setup-api-key-input.mjs.bak",
     "lib/memorax-code-adapter-common/src/credentials/evil-secret.mjs",
     "lib/memorax-code-claude-marketplace/plugins/memorax-code-claude-adapter/memorax-code-adapter-common/src/credentials/evil-secret.mjs",
     "lib/memorax-code-adapter-common/src/credentials/macos-keychain.mjs.bak",

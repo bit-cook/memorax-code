@@ -365,7 +365,7 @@ async function createFixture({
     // Exercise the shipped update CLI and transition module against a fake lifecycle CLI.
     await cp(join(packageRoot, "bin", "memorax-code.mjs"), join(root, "bin", "update-cli.mjs"));
     for (const name of [
-      "automatic-update", "client-hook-runtime", "npm-invocation", "run-entrypoint",
+      "automatic-update", "client-hook-runtime", "npm-invocation", "run-entrypoint", "setup-api-key-input",
       "resolve-claude-command", "resolve-codex-command", "resolve-codebuddy-command",
       "windows-cli-invocation", "windows-user-path", "vscode-extension-command",
     ]) {
