@@ -118,6 +118,41 @@ test("setup propagates an explicit home to the setup process", async () => {
   }
 });
 
+test("setup reports a blocked lock release even after the setup process succeeds", async () => {
+  const fixture = await createPackageFixture();
+  const entrypoint = join(fixture.root, "entrypoint-tty.mjs");
+  const lockPath = `${join(fixture.memoraxCodeHome, setupCompletionRelativePath)}.lock`;
+  try {
+    await writeFile(entrypoint, [
+      "import fs from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      `const lockPath = ${JSON.stringify(lockPath)};`,
+      "const originalUnlink = fs.unlinkSync;",
+      "fs.unlinkSync = (path) => {",
+      "  if (path === lockPath) throw new Error('[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] confirmation required');",
+      "  return originalUnlink(path);",
+      "};",
+      "syncBuiltinESMExports();",
+      await readFile(entrypoint, "utf8"),
+    ].join("\n"));
+
+    const result = runCli(fixture, ["setup", "--existing-account"], {
+      assumeInteractive: true,
+      stdinIsTTY: true,
+    });
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /memorax-code setup: failed to release JSON state lock:/);
+    assert.ok(result.stderr.includes(lockPath));
+    assert.match(result.stderr, /SAFE_DELETE_BULK_CONFIRM_REQUIRED/);
+    assert.equal((await readJsonLines(fixture.setupLogPath)).length, 1);
+    assert.equal(await pathExists(lockPath), true);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("setup propagates the setup process exit code", async () => {
   const fixture = await createPackageFixture();
   try {
@@ -432,6 +467,11 @@ async function createPackageFixture() {
     "process.exit(Number(process.env.MEMORAX_CODE_TEST_SETUP_EXIT_CODE ?? 0));",
     "",
   ].join("\n"));
+  await writeFile(join(root, "entrypoint-tty.mjs"), [
+    "Object.defineProperty(process.stdin, 'isTTY', { value: true });",
+    "await import('./bin/memorax-code.mjs');",
+    "",
+  ].join("\n"));
   const backendEntrypoint = join(root, "lib", "memorax-code-backend", "dist", "memorax-code.js");
   await mkdir(dirname(backendEntrypoint), { recursive: true });
   await writeFile(backendEntrypoint, [
@@ -458,6 +498,7 @@ function runCli(fixture, args = [], {
   backendExitCode = 0,
   extraEnv = {},
   setupExitCode = 0,
+  stdinIsTTY = false,
   timeout = 5_000,
 } = {}) {
   const env = {
@@ -483,7 +524,7 @@ function runCli(fixture, args = [], {
   else delete env.MEMORAX_CODE_SETUP_ASSUME_INTERACTIVE;
   return spawnSync(
     process.execPath,
-    [join(fixture.root, "bin", "memorax-code.mjs"), ...args],
+    [stdinIsTTY ? join(fixture.root, "entrypoint-tty.mjs") : join(fixture.root, "bin", "memorax-code.mjs"), ...args],
     {
       encoding: "utf8",
       env,

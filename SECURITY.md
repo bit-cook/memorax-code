@@ -218,11 +218,12 @@ the product creates or tightens the home to mode `0700` and newly seeded
 configuration to mode `0600`; Windows relies on the current user's filesystem
 ACLs.
 
-Shared state locks publish complete, process-qualified owner records atomically
-before entering a critical section. This prevents stale-lock recovery from
-mistaking an owner still being written for an abandoned lock. State and managed
-configuration storage must support same-directory hard links; a failed atomic
-publication does not grant ownership or permit an unlocked update.
+Shared state locks exclusively create a private lock file and write its
+process-qualified owner record before entering a critical section. A failed
+owner-record write does not permit the protected operation. Incomplete records
+are eligible for recovery only after the stale threshold; an interrupted
+acquisition can leave such a record. Stale-lock recovery still requires
+same-directory hard links and actual unlink semantics for claim cleanup.
 
 Codex, Claude Code, CodeBuddy/WorkBuddy, DSH, OpenCode, and Trae local trace capture is enabled by default.
 Depending on the enabled client capabilities, traces may include prompts,

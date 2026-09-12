@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import {
   closeSync,
   existsSync,
+  fstatSync,
+  ftruncateSync,
   linkSync,
   mkdirSync,
   openSync,
@@ -114,27 +116,36 @@ export function withJsonFileLock(path, operation, options = {}) {
     ensurePrivateDirectory(directory, { durableBoundary: directory });
   }
 
-  while (!tryAcquireJsonFileLock(lockPath, ownerId)) {
-    if (removeStaleJsonFileLock(lockPath, staleMs, observedProcessStarts)) continue;
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      const error = new Error(`timed out waiting for JSON state lock: ${lockPath}`);
-      error.code = "JSON_FILE_LOCK_TIMEOUT";
-      error.path = path;
-      error.lockPath = lockPath;
-      throw error;
+  const acquisition = {};
+  try {
+    while (!tryAcquireJsonFileLock(lockPath, ownerId, acquisition)) {
+      if (removeStaleJsonFileLock(lockPath, staleMs, observedProcessStarts)) continue;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        const error = new Error(`timed out waiting for JSON state lock: ${lockPath}`);
+        error.code = "JSON_FILE_LOCK_TIMEOUT";
+        error.path = path;
+        error.lockPath = lockPath;
+        throw error;
+      }
+      sleepSync(Math.min(retryMs, remainingMs));
     }
-    sleepSync(Math.min(retryMs, remainingMs));
+  } finally {
+    closeJsonFileLockAcquisition(acquisition, true);
   }
 
+  let operationFailure;
   try {
     const result = operation();
     if (result && typeof result.then === "function") {
       throw new TypeError("withJsonFileLock operation must be synchronous");
     }
     return result;
+  } catch (error) {
+    operationFailure = { error };
+    throw error;
   } finally {
-    releaseJsonFileLock(lockPath, ownerId);
+    releaseJsonFileLock(lockPath, ownerId, operationFailure);
   }
 }
 
@@ -155,71 +166,101 @@ export async function withJsonFileLockAsync(path, operation, options = {}) {
     ensurePrivateDirectory(directory, { durableBoundary: directory });
   }
 
-  while (!tryAcquireJsonFileLock(lockPath, ownerId)) {
-    throwIfJsonFileLockAborted(signal, path, lockPath);
-    if (removeStaleJsonFileLock(lockPath, staleMs, observedProcessStarts)) continue;
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      const error = new Error(`timed out waiting for JSON state lock: ${lockPath}`);
-      error.code = "JSON_FILE_LOCK_TIMEOUT";
-      error.path = path;
-      error.lockPath = lockPath;
-      throw error;
+  const acquisition = {};
+  try {
+    while (!tryAcquireJsonFileLock(lockPath, ownerId, acquisition)) {
+      throwIfJsonFileLockAborted(signal, path, lockPath);
+      if (removeStaleJsonFileLock(lockPath, staleMs, observedProcessStarts)) continue;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        const error = new Error(`timed out waiting for JSON state lock: ${lockPath}`);
+        error.code = "JSON_FILE_LOCK_TIMEOUT";
+        error.path = path;
+        error.lockPath = lockPath;
+        throw error;
+      }
+      await sleep(Math.min(retryMs, remainingMs), signal, path, lockPath);
     }
-    await sleep(Math.min(retryMs, remainingMs), signal, path, lockPath);
+  } finally {
+    closeJsonFileLockAcquisition(acquisition, true);
   }
 
+  let operationFailure;
   try {
     throwIfJsonFileLockAborted(signal, path, lockPath);
     return await operation();
+  } catch (error) {
+    operationFailure = { error };
+    throw error;
   } finally {
-    releaseJsonFileLock(lockPath, ownerId);
+    releaseJsonFileLock(lockPath, ownerId, operationFailure);
   }
 }
 
-function tryAcquireJsonFileLock(lockPath, ownerId) {
-  if (existsSync(lockPath)) return false;
-  const claimPath = jsonFileLockClaimPath(lockPath);
-  let descriptor;
-  let claimCreated = false;
+function tryAcquireJsonFileLock(lockPath, ownerId, acquisition) {
+  if (acquisition.descriptor === undefined) {
+    let descriptor;
+    try {
+      // Normal acquisition needs no disposable claim that a host may recycle.
+      descriptor = openSync(lockPath, "wx", 0o600);
+      writeFileSync(descriptor, `${JSON.stringify({
+        version: 1,
+        ownerId,
+        pid: process.pid,
+        processStartedAt: new Date(performance.timeOrigin).toISOString(),
+        createdAt: new Date().toISOString(),
+      })}\n`);
+      acquisition.descriptor = descriptor;
+    } catch (error) {
+      if (descriptor !== undefined) {
+        try {
+          closeSync(descriptor);
+        } catch {
+          // Best-effort cleanup after an incomplete lock acquisition.
+        }
+        // Preserve a replacement or incomplete owner record for stale recovery.
+        releaseJsonFileLock(lockPath, ownerId, { error });
+      }
+      if (error?.code === "EEXIST") return false;
+      throw error;
+    }
+  }
+
+  // A reaper may have observed the empty file before the owner record was written.
+  // Keep the descriptor while waiting: an open, unlinked file is not ownership.
+  const owned = fstatSync(acquisition.descriptor);
+  let current;
   try {
-    descriptor = openSync(claimPath, "wx", 0o600);
-    claimCreated = true;
-    writeFileSync(descriptor, `${JSON.stringify({
-      version: 1,
-      ownerId,
-      pid: process.pid,
-      processStartedAt: new Date(performance.timeOrigin).toISOString(),
-      createdAt: new Date().toISOString(),
-    })}\n`);
-    closeSync(descriptor);
-    descriptor = undefined;
-    // Reapers must never observe a public lock before its owner record is complete.
-    linkSync(claimPath, lockPath);
-    return true;
+    current = statSync(lockPath);
   } catch (error) {
-    if (error?.code === "EEXIST") return false;
-    throw error;
+    if (error?.code !== "ENOENT") throw error;
+  }
+  if (!current || current.dev !== owned.dev || current.ino !== owned.ino) {
+    closeJsonFileLockAcquisition(acquisition);
+    return false;
+  }
+  // An earlier reaper can still unlink this file until it drops its claim.
+  if (owned.nlink !== 1 || current.nlink !== 1) return false;
+  closeJsonFileLockAcquisition(acquisition);
+  return true;
+}
+
+function closeJsonFileLockAcquisition(acquisition, abandoned = false) {
+  const descriptor = acquisition.descriptor;
+  if (descriptor === undefined) return;
+  acquisition.descriptor = undefined;
+  try {
+    // A timed-out or aborted publication never entered the critical section.
+    // Clear its owner through the held descriptor so stale recovery can reclaim
+    // it even if this process stays alive; never unlink an in-flight reaper's path.
+    if (abandoned) ftruncateSync(descriptor, 0);
   } finally {
-    if (descriptor !== undefined) {
-      try {
-        closeSync(descriptor);
-      } catch {
-        // Best-effort cleanup after an incomplete lock acquisition.
-      }
-    }
-    if (claimCreated) {
-      try {
-        rmSync(claimPath, { force: true });
-      } catch {
-        // An orphaned private claim remains recoverable after this process exits.
-      }
-    }
+    closeSync(descriptor);
   }
 }
 
 function jsonFileLockClaimPath(lockPath) {
-  // Publication candidates and reaper links share process-qualified recovery.
+  // Stale-reaper claims retain process-qualified ownership for recovery.
   const claimId = randomUUID().replaceAll("-", "").slice(0, 24);
   return `${lockPath}.reap-v1-${process.pid}-${Math.trunc(performance.timeOrigin)}-${claimId}`;
 }
@@ -263,11 +304,12 @@ function removeStaleJsonFileLock(lockPath, staleMs, observedProcessStarts) {
     return false;
   }
   try {
-    const current = statSync(lockPath);
-    const claim = statSync(claimPath);
-    if (current.dev !== claim.dev || current.ino !== claim.ino) return false;
-    if (current.nlink !== 2 || claim.nlink !== 2) return false;
     if (readFileSync(claimPath, "utf8") !== snapshot.raw) return false;
+    const claim = statSync(claimPath);
+    if (claim.dev !== snapshot.dev || claim.ino !== snapshot.ino || claim.nlink !== 2) return false;
+    // Check the path last: two detached claims must not count as lock + claim.
+    const current = statSync(lockPath);
+    if (current.dev !== claim.dev || current.ino !== claim.ino || current.nlink !== 2) return false;
     unlinkSync(lockPath);
     return true;
   } catch {
@@ -313,12 +355,37 @@ function reapClaimOwnerIsAlive(pid, expectedProcessStartedAtMs, observedProcessS
   return sameProcessStart(expectedProcessStartedAtMs, actualProcessStartedAtMs);
 }
 
-function releaseJsonFileLock(lockPath, ownerId) {
+function releaseJsonFileLock(lockPath, ownerId, operationFailure) {
   try {
-    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    const raw = readFileSync(lockPath, "utf8");
+    let lock;
+    try {
+      lock = JSON.parse(raw);
+    } catch {
+      // An incomplete owner record cannot prove ownership; leave it for stale recovery.
+      return;
+    }
     if (lock?.ownerId === ownerId) unlinkSync(lockPath);
-  } catch {
-    // A missing, changed, or unreadable lock is not ours to remove.
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return;
+    const releaseError = new Error(
+      `failed to release JSON state lock: ${lockPath}: ${cause?.message ?? String(cause)}`,
+      { cause },
+    );
+    releaseError.code = "JSON_FILE_LOCK_RELEASE_FAILED";
+    releaseError.lockPath = lockPath;
+    if (operationFailure) {
+      // CLI callers often print only message; retain both failures there and as causes.
+      const error = new AggregateError(
+        [operationFailure.error, releaseError],
+        `${operationFailure.error?.message ?? String(operationFailure.error)}; ${releaseError.message}`,
+        { cause: operationFailure.error },
+      );
+      error.code = releaseError.code;
+      error.lockPath = lockPath;
+      throw error;
+    }
+    throw releaseError;
   }
 }
 

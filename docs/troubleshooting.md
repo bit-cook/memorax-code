@@ -117,6 +117,13 @@ failure. For older installations with a complete configuration, the
 no-argument command can perform a one-time migration; see
 [setup-completion behavior](configuration.md#setup-automatic-update-and-package-transition-state).
 
+If lock release is blocked by filesystem permissions or a client's deletion
+protection, the command reports `failed to release JSON state lock` with the
+lock path and underlying error. Any preceding operation error is also retained;
+successful configuration alone does not mean lock cleanup succeeded. Resolve
+the reported permission or client protection prompt before retrying. Do not
+delete a lock while its owning process may still be running.
+
 On Windows, shared Hook runtime publication and Trae/OpenCode directory
 installation briefly retry transient filesystem errors. If shared runtime
 publication still fails, setup stops before changing the active runtime or

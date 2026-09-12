@@ -162,14 +162,18 @@ function startWriter(path, releasePath, sessionId) {
     import { syncBuiltinESMExports } from "node:module";
     const [path, releasePath, sessionId] = process.argv.slice(1);
     const exists = fs.existsSync;
+    const open = fs.openSync;
     let reported = false;
-    fs.existsSync = (target) => {
-      const present = exists(target);
-      if (target === path + ".lock" && present && !reported) {
-        reported = true;
-        process.send("contending");
+    fs.openSync = (target, flags, ...options) => {
+      try {
+        return open(target, flags, ...options);
+      } catch (error) {
+        if (target === path + ".lock" && flags === "wx" && error?.code === "EEXIST" && !reported) {
+          reported = true;
+          process.send("contending");
+        }
+        throw error;
       }
-      return present;
     };
     syncBuiltinESMExports();
     const { updatePending } = await import(${JSON.stringify(pendingModuleUrl)});
