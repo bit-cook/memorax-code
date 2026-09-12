@@ -279,7 +279,7 @@ const codexHooksBeforeUpdate = codexClientEnabled
   ? inspectCodexPluginHooksForUpdate()
   : undefined;
 const result = codexClientEnabled
-  ? runNodeMemoraxCodeCommand(["codex-plugin", "install", "--json"], { print: verbose })
+  ? runNodeMemoraxCodeCommand(["codex-plugin", "install", "--json"], { print: verbose, printOnFailure: true })
   : { status: 0 };
 
 if (codexClientEnabled && result.status !== 0) {
@@ -795,7 +795,7 @@ function warnUpdatedHookTrustSkipped(message) {
 }
 
 function activateCodexPluginHooks() {
-  const activated = runNodeMemoraxCodeCommand(["codex-plugin", "activate", "--yes"], { print: verbose });
+  const activated = runNodeMemoraxCodeCommand(["codex-plugin", "activate", "--yes"], { print: verbose, printOnFailure: true });
   if (activated.status === 0) {
     logGreen("MemoraX Code Codex Adapter hooks activated and trusted.");
     return "activated";
@@ -1523,12 +1523,14 @@ function runMemoraxCodeCommand(args, extraEnv = {}, { print = true } = {}) {
 function runNodeMemoraxCodeCommand(args, {
   env = process.env,
   print = true,
+  printOnFailure = false,
   outputPrefix = PREFIX,
   timeout,
 } = {}) {
   return runNodeCliCommand(memoraxCodeBin, args, {
     env,
     print,
+    printOnFailure,
     outputPrefix,
     timeout,
   });
@@ -1556,13 +1558,13 @@ function runExternalCommand(command, args, { env = process.env, print = true, ou
   return runCommand(command, args, { env, print, outputPrefix, timeout });
 }
 
-function runCommand(command, args, { env = process.env, print = true, outputPrefix = PREFIX, timeout } = {}) {
+function runCommand(command, args, { env = process.env, print = true, printOnFailure = false, outputPrefix = PREFIX, timeout } = {}) {
   let invocation;
   try {
     invocation = resolveWindowsCliInvocation(command, args, { env });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (print) logRed(message);
+    if (print || printOnFailure) logRed(message);
     return { status: 1, stdout: "", stderr: message, error };
   }
   const result = spawnSync(invocation.command, invocation.args, {
@@ -1571,11 +1573,12 @@ function runCommand(command, args, { env = process.env, print = true, outputPref
     stdio: ["ignore", "pipe", "pipe"],
     ...(timeout ? { timeout } : {}),
   });
-  if (print) {
+  const showOutput = print || (printOnFailure && result.status !== 0);
+  if (showOutput) {
     printCommandOutput(result.stdout, outputPrefix);
     printCommandOutput(result.stderr, outputPrefix);
   }
-  if (result.error && print) logRed(`Failed to run \`${[command, ...args].join(" ")}\`: ${result.error.message}`);
+  if (result.error && showOutput) logRed(`Failed to run \`${[command, ...args].join(" ")}\`: ${result.error.message}`);
   return result;
 }
 

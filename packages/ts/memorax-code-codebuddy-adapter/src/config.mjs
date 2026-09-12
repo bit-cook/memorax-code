@@ -1,13 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codeBuddyMetadataClient, defaultCodeBuddyHome, defaultWorkBuddyHome, readCodeBuddyPackageMetadata, resolveHookCodeBuddyCommand } from "../../memorax-code-adapter-common/src/clients/codebuddy-command.mjs";
 import { readJsonRuntimeRecord, writePrivateJsonRecord } from "../../memorax-code-adapter-common/src/runtime-record.mjs";
 import { withJsonFileLockAsync } from "../../memorax-code-adapter-common/src/config-utils.mjs";
+import { fileTreeMatches } from "../../memorax-code-adapter-common/src/file-tree-match.mjs";
 import {
   codeBuddyHookManifestConfigured,
+  configureCodeBuddyHookManifest,
   codeBuddyUserPromptHookCommand,
   codeBuddyUserPromptHookConfigured,
   hasManagedCodeBuddyUserPromptHook,
@@ -171,21 +173,18 @@ async function enableAdapter(options) {
   // Installation alone cannot prove native Hook execution; require a fresh
   // runtime observation instead of carrying one over from the previous install.
   await rm(codeBuddyRuntimeObservationPath(memoraxCodeHome, client), { force: true });
-  await mkdir(dirname(installPath), { recursive: true });
-  await rm(installPath, { recursive: true, force: true });
   await rm(legacyCodeBuddyInstallPath(home), { recursive: true, force: true });
-  await cp(ROOT, installPath, { recursive: true, force: true, filter: packageCopyFilter(ROOT) });
-  await materializeCommonRuntime(installPath);
-  await materializeCodeBuddyHookManifest(installPath, platform);
-  await writePackageMetadata(installPath, codeBuddyCommand, home, options.memoraxCodeCommand, client);
-  await materializeCanonicalSkill(installPath);
-  await mkdir(dirname(localPluginPath), { recursive: true });
-  await rm(localPluginPath, { recursive: true, force: true });
-  await cp(ROOT, localPluginPath, { recursive: true, force: true, filter: packageCopyFilter(ROOT) });
-  await materializeCommonRuntime(localPluginPath);
-  await materializeCodeBuddyHookManifest(localPluginPath, platform);
-  await writePackageMetadata(localPluginPath, codeBuddyCommand, home, options.memoraxCodeCommand, client);
-  await materializeCanonicalSkill(localPluginPath);
+  for (const destination of [installPath, localPluginPath]) {
+    if (!await installedPluginMatches(destination, platform)) {
+      await mkdir(dirname(destination), { recursive: true });
+      await rm(destination, { recursive: true, force: true });
+      await cp(ROOT, destination, { recursive: true, force: true, filter: packageCopyFilter(ROOT) });
+      await materializeCommonRuntime(destination);
+      await materializeCodeBuddyHookManifest(destination, platform);
+      await materializeCanonicalSkill(destination);
+    }
+    await writePackageMetadata(destination, codeBuddyCommand, home, options.memoraxCodeCommand, client);
+  }
   await writeMarketplaceManifest(home);
   await updateKnownMarketplace(home, true);
   await updateSettings(home, (settings) => {
@@ -398,13 +397,35 @@ function legacyCodeBuddyInstallPath(home) { return join(home, "plugins", "cache"
 function codeBuddyPluginCacheRoot(home) { return dirname(codeBuddyInstallPath(home)); }
 function legacyCodeBuddyPluginCacheRoot(home) { return dirname(legacyCodeBuddyInstallPath(home)); }
 
+async function installedPluginMatches(destination, platform) {
+  const target = await lstat(destination).catch((error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!target?.isDirectory() || target.isSymbolicLink()) return false;
+  const ignore = (path) => path.split("/").some((part) => part === "test" || part === "node_modules");
+  const sources = new Map((await readdir(ROOT)).filter((name) => !ignore(name)).map((name) => [name, join(ROOT, name)]));
+  sources.set("memorax-code-adapter-common", join(ROOT, "..", "memorax-code-adapter-common"));
+  if (!sources.has("skills")) sources.set("skills", join(ROOT, "..", "memorax-code-codex-adapter", "skills"));
+  const actual = (await readdir(destination)).filter((name) => name !== ".memorax-code-package.json").sort();
+  if (JSON.stringify(actual) !== JSON.stringify([...sources.keys()].sort())) return false;
+  for (const [name, source] of sources) {
+    if (!await fileTreeMatches(source, join(destination, name), {
+      ignore,
+      transform: (path, content) => name === "hooks" && path === "hooks.json"
+        ? Buffer.from(`${JSON.stringify(configureCodeBuddyHookManifest(JSON.parse(content.toString("utf8")), destination, platform), null, 2)}\n`)
+        : content,
+    })) return false;
+  }
+  return true;
+}
+
 async function materializeCanonicalSkill(destination) {
-  const packagedSkill = join(ROOT, "skills", "memorax-code");
-  const canonicalSkill = join(ROOT, "..", "memorax-code-codex-adapter", "skills", "memorax-code");
-  const source = await pathExists(packagedSkill) ? packagedSkill : canonicalSkill;
-  if (!await pathExists(source)) throw new Error(`MemoraX Code canonical skill is unavailable: ${source}`);
   const target = join(destination, "skills", "memorax-code");
-  await rm(target, { recursive: true, force: true });
+  // enableAdapter recreates the plugin tree, including any packaged Skill.
+  if (await pathExists(target)) return;
+  const source = join(ROOT, "..", "memorax-code-codex-adapter", "skills", "memorax-code");
+  if (!await pathExists(source)) throw new Error(`MemoraX Code canonical skill is unavailable: ${source}`);
   await mkdir(dirname(target), { recursive: true });
   await cp(source, target, { recursive: true, force: true });
 }

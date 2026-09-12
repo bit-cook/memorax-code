@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ import {
   isCompleteCodexPluginArtifact,
 } from "../../../../memorax-code-adapter-common/src/clients/codex-plugin-artifact.mjs";
 import { atomicWriteJson } from "../../../../memorax-code-adapter-common/src/config-utils.mjs";
+import { fileTreeMatches } from "../../../../memorax-code-adapter-common/src/file-tree-match.mjs";
 import {
   confirmHookTrust,
   listMemoraxCodeHooks,
@@ -23,6 +25,7 @@ const CLI_MARKETPLACE_NAME = "memorax-code";
 const PLUGIN_ID = `${PLUGIN_NAME}@${CLI_MARKETPLACE_NAME}`;
 const ADAPTER_COMMON_NAME = "memorax-code-adapter-common";
 const PLUGIN_LIST_TIMEOUT_MS = 10_000;
+const PLUGIN_SOURCE_ENTRIES = [".codex-plugin", "assets", "hooks", "runtime-hooks", "skills", "src", "package.json"];
 
 type MarketplaceEntry = {
   name: string;
@@ -404,7 +407,7 @@ async function removeActivatedCodexPlugin(
   const marketplace = await runCommand(codexCommand, ["plugin", "marketplace", "remove", CLI_MARKETPLACE_NAME], { cwd: workspace, env });
   if (commandUnavailable(marketplace)) return { ...marketplace, ok: true, skipped: true, reason: "codex_cli_unavailable" };
   const results = [explicit, marketplace];
-  const failed = results.find((result) => !result.ok && !/not found|not installed|unknown marketplace/i.test(result.stderr || result.stdout));
+  const failed = results.find((result) => !result.ok && !/not found|not installed|not configured or installed|unknown marketplace/i.test(result.stderr || result.stdout));
   if (failed) return failed;
   return {
     ok: true,
@@ -416,15 +419,19 @@ async function removeActivatedCodexPlugin(
 async function stageCodexCliMarketplace(install: CodexPluginInstallReport): Promise<string> {
   const root = codexCliMarketplaceRoot(install.codexHome);
   const pluginPath = join(root, "plugins", PLUGIN_NAME);
-  await rm(root, { recursive: true, force: true });
-  await mkdir(join(root, ".agents", "plugins"), { recursive: true });
-  await mkdir(dirname(pluginPath), { recursive: true });
-  await cp(install.pluginSourcePath, pluginPath, { recursive: true });
-  await writeFile(join(root, ".agents", "plugins", "marketplace.json"), `${JSON.stringify({
+  const manifestPath = join(root, ".agents", "plugins", "marketplace.json");
+  const manifest = {
     name: CLI_MARKETPLACE_NAME,
     interface: { displayName: "MemoraX Code" },
     plugins: [pluginEntry(`./plugins/${PLUGIN_NAME}`)],
-  }, null, 2)}\n`, "utf8");
+  };
+  if (await fileTreeMatches(install.pluginSourcePath, pluginPath)
+    && isDeepStrictEqual(await readJsonRecord(manifestPath), manifest)) return root;
+  await rm(root, { recursive: true, force: true });
+  await mkdir(dirname(manifestPath), { recursive: true });
+  await mkdir(dirname(pluginPath), { recursive: true });
+  await cp(install.pluginSourcePath, pluginPath, { recursive: true });
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   return root;
 }
 
@@ -542,14 +549,34 @@ async function verifyVersionedPlugin(root: string, version: string): Promise<voi
 }
 
 async function stagePluginSource(sourceRoot: string, targetRoot: string): Promise<void> {
+  // activate also ensures installation; reuse the complete, transformed tree.
+  if (await stagedPluginMatches(sourceRoot, targetRoot)) return;
   await mkdir(dirname(targetRoot), { recursive: true });
   await rm(targetRoot, { recursive: true, force: true });
   await rm(join(dirname(targetRoot), ADAPTER_COMMON_NAME), { recursive: true, force: true });
   await mkdir(targetRoot, { recursive: true });
-  for (const entry of [".codex-plugin", "assets", "hooks", "runtime-hooks", "skills", "src", "package.json"]) {
+  for (const entry of PLUGIN_SOURCE_ENTRIES) {
     await cp(join(sourceRoot, entry), join(targetRoot, entry), { recursive: true });
   }
   await stageAdapterCommonSource(sourceRoot, targetRoot);
+}
+
+async function stagedPluginMatches(sourceRoot: string, targetRoot: string): Promise<boolean> {
+  const target = await lstat(targetRoot).catch((error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!target?.isDirectory() || target.isSymbolicLink()) return false;
+  const entries = (await readdir(targetRoot)).filter((name) => name !== ".memorax-code-package.json").sort();
+  if (!isDeepStrictEqual(entries, [...PLUGIN_SOURCE_ENTRIES, ADAPTER_COMMON_NAME].sort())) return false;
+  for (const name of PLUGIN_SOURCE_ENTRIES) {
+    if (!await fileTreeMatches(join(sourceRoot, name), join(targetRoot, name), {
+      transform: (path, content) => ["hooks", "runtime-hooks", "src"].includes(name) && path.endsWith(".mjs")
+        ? Buffer.from(rewriteCommonImportContent(content.toString("utf8")))
+        : content,
+    })) return false;
+  }
+  return fileTreeMatches(resolve(sourceRoot, "..", ADAPTER_COMMON_NAME), join(targetRoot, ADAPTER_COMMON_NAME));
 }
 
 async function stageAdapterCommonSource(sourceRoot: string, targetRoot: string): Promise<void> {
@@ -567,10 +594,14 @@ async function rewriteAdapterCommonImports(targetRoot: string): Promise<void> {
   for (const dir of ["hooks", "runtime-hooks", "src"]) {
     for (const path of mjsFiles(join(targetRoot, dir))) {
       const text = await readFile(path, "utf8");
-      const next = text.replaceAll("../../memorax-code-adapter-common/src/", "../memorax-code-adapter-common/src/");
+      const next = rewriteCommonImportContent(text);
       if (next !== text) await writeFile(path, next, "utf8");
     }
   }
+}
+
+function rewriteCommonImportContent(text: string): string {
+  return text.replaceAll("../../memorax-code-adapter-common/src/", "../memorax-code-adapter-common/src/");
 }
 
 function mjsFiles(root: string): string[] {
@@ -592,9 +623,11 @@ async function writePluginMetadata(pluginSourcePath: string, codexCommand?: stri
     memoraxCodeCommand: process.argv[1],
     ...(normalizedCodexCommand ? { codexCommand: normalizedCodexCommand } : {}),
     ...(npmExecPath ? { npmExecPath } : {}),
-    writtenAt: new Date().toISOString(),
   };
-  await writeFile(join(pluginSourcePath, ".memorax-code-package.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+  const path = join(pluginSourcePath, ".memorax-code-package.json");
+  const { writtenAt: _writtenAt, ...previous } = await readJsonRecord(path) ?? {};
+  if (isDeepStrictEqual(previous, metadata)) return;
+  await writeFile(path, `${JSON.stringify({ ...metadata, writtenAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
 }
 
 async function upsertPersonalMarketplace(marketplacePath: string, entry: MarketplaceEntry): Promise<boolean> {
