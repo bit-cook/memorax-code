@@ -245,6 +245,29 @@ or platform verification. Keep new behavior cases in the owning suites.
 
 ## Validation
 
+The [CI workflow](.github/workflows/ci.yml) runs on pull requests targeting
+`main` and every push to `main`, and can also be started manually. It has two
+checks on Linux with Node.js 24:
+
+- **Tests** runs `make test`: locked dependency installation, version
+  consistency, Backend type checking and compilation, all Backend, shared
+  runtime, shared Skill and adapter tests, npm package tests, and the local-only
+  trace gate. Test state uses an isolated home.
+- **Documentation** runs `make docs-check`: documentation contracts, local
+  links, shipped-document consistency, and mandatory paired README changes.
+  If either `README.md` or `README.zh.md` changes, both must change in the PR,
+  including language-specific edits. Reviewers verify that the content stays
+  synchronized. The checkout includes Git history and an explicit comparison
+  range so README checking does not silently skip for lack of a base ref.
+  Manual runs compare the selected commit with its first parent.
+
+Both checks run without path filters and keep stable names. Protect `main` by
+requiring **Tests** and **Documentation** in GitHub branch protection, including
+administrator merges. This setting is managed separately from the workflow.
+Full package installation and real-client checks remain separate from these
+basic checks. Use the Install/artifacts profile below for packaging or lifecycle
+changes. These checks require no model, MemoraX, or Jev credentials.
+
 Choose checks by impact from the profiles below. For architecture changes,
 the [change-routing table](ARCHITECTURE.md#8-test-architecture-and-change-routing)
 maps boundaries to owning tests and named profiles. Focused tests shorten the
@@ -287,9 +310,9 @@ Shared Skill and native launcher tests cover the real canonical Skill validator.
 Do not rerun an identical prerequisite build if the Backend profile has already
 built the same source. Rebuild whenever TypeScript changes. The Documentation
 profile checks local link targets, public paths, and shipped-document consistency;
-its README synchronization script compares committed Git refs, so also review
-uncommitted README changes in both languages. These checks do not prove prose
-accuracy or command behavior.
+its mandatory README synchronization script compares committed Git refs, so also
+review uncommitted README changes in both languages. These checks do not prove
+prose accuracy or command behavior.
 
 Native Windows package smoke coverage lives in
 [windows-npm-package-e2e.mjs](scripts/windows-npm-package-e2e.mjs). The separate
